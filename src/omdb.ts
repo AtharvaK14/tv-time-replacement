@@ -53,3 +53,46 @@ export async function getOmdbRatings(title: string, year: number | null): Promis
     plot: data.Plot && data.Plot !== "N/A" ? data.Plot : null,
   };
 }
+
+export interface OmdbEpisodeRating {
+  imdbRating: string | null;
+  imdbId: string | null;
+  plot: string | null;
+}
+
+/**
+ * Per-episode IMDb rating via OMDb's documented Season+Episode query params
+ * (?t=<show>&Season=X&Episode=Y), added per OMDb's own changelog. This is a
+ * SEPARATE lookup from the show-level rating, IMDb rates each episode of a
+ * series individually.
+ *
+ * NOTE: this has been implemented against OMDb's documented parameters but
+ * not yet run against a live key in this environment. If it returns nulls
+ * across the board, check the raw response shape first, don't assume the
+ * params are wrong before verifying.
+ */
+export async function getOmdbEpisodeRating(
+  showTitle: string,
+  seasonNumber: number,
+  episodeNumber: number
+): Promise<OmdbEpisodeRating | null> {
+  const key = getOmdbKey();
+  if (!key) return null;
+
+  const url = new URL(OMDB_BASE);
+  url.searchParams.set("apikey", key);
+  url.searchParams.set("t", showTitle);
+  url.searchParams.set("Season", String(seasonNumber));
+  url.searchParams.set("Episode", String(episodeNumber));
+
+  const res = await fetch(url.toString());
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (data.Response !== "True") return null;
+
+  return {
+    imdbRating: data.imdbRating && data.imdbRating !== "N/A" ? data.imdbRating : null,
+    imdbId: data.imdbID || null,
+    plot: data.Plot && data.Plot !== "N/A" ? data.Plot : null,
+  };
+}

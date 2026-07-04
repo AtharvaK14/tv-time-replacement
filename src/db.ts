@@ -21,7 +21,9 @@ export interface Episode {
   seasonNumber: number;
   episodeNumber: number;
   name: string;
+  overview: string | null;
   airDate: string | null;
+  tmdbRating: number; // TMDB's own vote_average, 0-10, always free, distinct from IMDb's rating
 }
 
 export interface WatchedEpisode {
@@ -50,6 +52,8 @@ export interface TitleMatch {
   kind: "show" | "movie";
   tmdbId: number | null;
   matchedName: string | null;
+  // Optional because title matches cached before this field existed won't have it.
+  matchMethod?: "single" | "year-hint" | "exact-title" | "popularity-dominant" | "user-picked" | "skipped";
 }
 
 export interface Setting {
@@ -89,6 +93,21 @@ class TrackerDB extends Dexie {
       titleMatches: "rawTitle, kind",
       settings: "key",
     });
+    // v3: added overview + tmdbRating to Episode for the episode-level
+    // details panel. Existing cached episode rows predate these fields and
+    // would otherwise sit there permanently with them undefined, since the
+    // cache-check logic only tests "do we have this season at all", not
+    // "does it have the current fields". Clearing forces a clean refetch.
+    this.version(3)
+      .stores({
+        shows: "tmdbId, name, isFollowed, lastWatchedAt",
+        episodes: "key, showId, [showId+seasonNumber]",
+        watchedEpisodes: "key, showId, watchedAt",
+        movies: "tmdbId, title, watched, wantsToWatch",
+        titleMatches: "rawTitle, kind",
+        settings: "key",
+      })
+      .upgrade((tx) => tx.table("episodes").clear());
   }
 }
 

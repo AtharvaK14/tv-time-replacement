@@ -79,6 +79,44 @@ empirically confirmed against a live key: Rotten Tomatoes scores through
 OMDb appear to be movie-only, not available for TV series. Try it once you
 have a key and this note should get corrected either way.
 
+## Ambiguous title matching: hybrid, not all-or-nothing
+
+Blocking on every ambiguous title turned out to be genuinely tedious in
+practice (confirmed by actually using it, not predicted). The fix isn't
+"auto-pick everything" (risks silent wrong matches) or "keep blocking
+everything" (the tedium that prompted this). Matches now resolve, in order:
+
+1. Only one TMDB result exists, no ambiguity to begin with.
+2. TV Time's own year suffix (`Show (2018)`) uniquely picks one candidate.
+3. Exactly one candidate's title matches the query verbatim, a same-named
+   unrelated show is unlikely to also be an exact string match.
+4. The top-ranked candidate (in TMDB's own relevance order, not re-sorted)
+   is at least 3x more popular than the runner-up, decisive enough to trust.
+5. Otherwise, genuinely a toss-up, still blocks and asks.
+
+The 3x threshold (`POPULARITY_DOMINANCE_RATIO` in `matcher.ts`) is a
+judgment call, not a documented TMDB standard, there's no "correct" number
+here. The import summary breaks down how many titles resolved by which
+method, including a flagged count of popularity-based auto-picks, so
+they're visible and spot-checkable rather than silently trusted.
+
+## Episode-level details (added after live testing confirmed OMDb works)
+
+Clicking an episode name now opens a details panel with:
+- Overview and TMDB's own rating (`vote_average`), both confirmed present in
+  TMDB's real season-details response schema, not assumed.
+- IMDb rating via OMDb's documented `Season`+`Episode` query parameters
+  (`?t=<show>&Season=X&Episode=Y`), added to OMDb's API per their own
+  changelog. **This has not been run against a live key in this environment.**
+  If it comes back empty across the board once you try it, check the raw
+  OMDb response shape first before assuming the parameters are wrong.
+
+Show pages are now a collapsible season accordion instead of everything
+expanded at once, matching the "pick a show, then a season, then see its
+episodes" structure you asked for. Episode lists for a season are only
+fetched from TMDB when you actually expand that season, not all at once,
+which also cuts down on unnecessary API calls for shows you don't revisit.
+
 ## What I could NOT verify in this environment
 
 - **No live TMDB or OMDb calls were made.** I have no API keys or browser

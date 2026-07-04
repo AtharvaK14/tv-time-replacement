@@ -101,6 +101,32 @@ export default function ImportWizard() {
             Shows matched: {result.showsMatched} &middot; Episodes imported: {result.episodesImported} &middot;
             Movies matched: {result.moviesMatched}
           </p>
+
+          <details open>
+            <summary>How matches were resolved</summary>
+            <ul className="match-method-list">
+              {result.matchMethodCounts.single > 0 && (
+                <li>{result.matchMethodCounts.single} had only one TMDB result, unambiguous</li>
+              )}
+              {result.matchMethodCounts["year-hint"] > 0 && (
+                <li>{result.matchMethodCounts["year-hint"]} resolved by TV Time's own year suffix</li>
+              )}
+              {result.matchMethodCounts["exact-title"] > 0 && (
+                <li>{result.matchMethodCounts["exact-title"]} resolved by exact title match</li>
+              )}
+              {result.matchMethodCounts["popularity-dominant"] > 0 && (
+                <li>
+                  <strong>{result.matchMethodCounts["popularity-dominant"]} auto-picked</strong> because one
+                  candidate was decisively more popular, worth a quick spot check
+                </li>
+              )}
+              {result.matchMethodCounts["user-picked"] > 0 && (
+                <li>{result.matchMethodCounts["user-picked"]} you picked manually</li>
+              )}
+              {result.matchMethodCounts.skipped > 0 && <li>{result.matchMethodCounts.skipped} skipped, no confident match</li>}
+            </ul>
+          </details>
+
           {result.showsSkipped.length > 0 && (
             <details>
               <summary>{result.showsSkipped.length} show title(s) skipped</summary>

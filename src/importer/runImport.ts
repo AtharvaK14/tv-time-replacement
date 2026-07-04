@@ -23,6 +23,7 @@ export interface ImportResult {
   moviesMatched: number;
   moviesSkipped: string[];
   episodesImported: number;
+  matchMethodCounts: Record<string, number>;
 }
 
 /**
@@ -41,7 +42,14 @@ export async function runImport(
     moviesMatched: 0,
     moviesSkipped: [],
     episodesImported: 0,
+    matchMethodCounts: {},
   };
+
+  async function tallyMethod(rawTitle: string) {
+    const m = await db.titleMatches.get(rawTitle);
+    const method = m?.matchMethod ?? "unknown";
+    result.matchMethodCounts[method] = (result.matchMethodCounts[method] ?? 0) + 1;
+  }
 
   // ---- Episodes + follow status, both from tracking-prod-records-v2.csv ----
   if (opts.recordsV2CsvText) {
@@ -57,6 +65,7 @@ export async function runImport(
       onProgress?.({ phase: "shows", current: i + 1, total: titles.length, currentTitle: rawTitle });
 
       const tmdbId = await resolveShowTitle(rawTitle, resolveAmbiguous);
+      await tallyMethod(rawTitle);
       if (tmdbId === null) {
         result.showsSkipped.push(rawTitle);
         continue;
@@ -142,6 +151,7 @@ export async function runImport(
       onProgress?.({ phase: "movies", current: i + 1, total: titles.length, currentTitle: rawTitle });
 
       const tmdbId = await resolveMovieTitle(rawTitle, resolveAmbiguous);
+      await tallyMethod(rawTitle);
       if (tmdbId === null) {
         result.moviesSkipped.push(rawTitle);
         continue;

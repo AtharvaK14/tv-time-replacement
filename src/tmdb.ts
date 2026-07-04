@@ -40,6 +40,7 @@ export interface TvSearchResult {
   name: string;
   first_air_date: string | null;
   poster_path: string | null;
+  popularity: number;
 }
 
 export interface MovieSearchResult {
@@ -47,6 +48,7 @@ export interface MovieSearchResult {
   title: string;
   release_date: string | null;
   poster_path: string | null;
+  popularity: number;
 }
 
 export async function searchTvShow(query: string): Promise<TvSearchResult[]> {
@@ -79,7 +81,9 @@ export async function getTvShowDetails(tmdbId: number): Promise<TvShowDetails> {
 export interface SeasonEpisode {
   episode_number: number;
   name: string;
+  overview: string | null;
   air_date: string | null;
+  vote_average: number;
 }
 
 export interface SeasonDetails {
