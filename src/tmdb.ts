@@ -138,17 +138,27 @@ export async function getMovieGenres(): Promise<Genre[]> {
 // ---- Discovery (Add page suggestions) ----------------------------------------
 
 export async function getPopularTvShows(): Promise<TvSearchResult[]> {
-  const data = await tmdbGet<{ results: TvSearchResult[] }>("/tv/popular");
+  // TMDB's own docs: "popularity" is a lifetime aggregate score, not a
+  // "right now" signal, that's what caused decades-old or niche shows to
+  // show up under a "right now" label. "Trending" is TMDB's actual concept
+  // for that, confirmed via their popularity-and-trending documentation.
+  const data = await tmdbGet<{ results: TvSearchResult[] }>("/trending/tv/week");
   return data.results;
 }
 
 export async function getPopularMovies(): Promise<MovieSearchResult[]> {
-  const data = await tmdbGet<{ results: MovieSearchResult[] }>("/movie/popular");
+  const data = await tmdbGet<{ results: MovieSearchResult[] }>("/trending/movie/week");
   return data.results;
 }
 
 export async function getUpcomingMovies(): Promise<MovieSearchResult[]> {
-  const data = await tmdbGet<{ results: MovieSearchResult[] }>("/movie/upcoming");
+  // Without a region, TMDB's /movie/upcoming treats a film as "upcoming" if
+  // it hasn't released ANYWHERE in the world yet, so something already out
+  // in the US but not yet in, say, Japan still qualifies. Confirmed via
+  // multiple real TMDB bug reports matching this exact symptom (movies a
+  // month past their US release still showing as upcoming). region=US
+  // filters to US release dates specifically.
+  const data = await tmdbGet<{ results: MovieSearchResult[] }>("/movie/upcoming", { region: "US" });
   return data.results;
 }
 

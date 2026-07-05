@@ -235,3 +235,20 @@ src/
 - Added genre filter to Movies and to the Home movie watchlist. Sorting movies by rating isn't implemented, ratings come from OMDb live and aren't cached per movie, sorting by something not actually stored would be fake, so it currently falls back to title order, flagged in the code rather than silently wrong.
 - Add page now shows Popular shows, Popular movies, Upcoming movies, and a "Recently available at home" section when the search box is empty. That last one is TMDB's closest real equivalent to Rotten Tomatoes' page (recent US digital releases via TMDB's own release-type data), it's a genuine approximation using documented TMDB filters, not the same curation RT does, said plainly in the UI too.
 
+## This round: two confirmed TMDB endpoint bugs, a CSS scoping bug, nav restructure, and the stats question resolved (not by a new CSV)
+
+**"Upcoming movies" showing already-released movies was a real, well-documented TMDB behavior**, not a guess. Confirmed via multiple independent TMDB bug reports matching your exact symptom: without a `region` parameter, `/movie/upcoming` treats a film as upcoming if it hasn't released *anywhere in the world* yet, so something already out in the US but not yet released in, say, Japan still qualifies. Fixed with `region=US`.
+
+**"Popular TV shows" pulling in decades-old or irrelevant shows was also real, confirmed from TMDB's own documentation.** "Popularity" on TMDB is explicitly a lifetime aggregate score, not a "right now" signal, that's their own stated distinction from "Trending," which uses short (daily/weekly) windows specifically to surface current relevance. Switched both TV and movie suggestions to `/trending/{type}/week`, and relabeled the sections so they say what they now actually show.
+
+**The Home toggle not highlighting was a CSS scoping bug, not a missing feature.** The JS logic was already correct; the CSS rule providing the highlight was accidentally scoped to `.app-header nav` only, so the same class name did nothing when reused on the Home page's Shows/Movies toggle. Fixed with a general-purpose rule.
+
+**Nav restructure done as asked:** Import and Diagnostics now live as collapsible sections inside Settings, "Add" is now "Discover," and "Add to Library" now says "Add to Shows" or "Add to Movies" depending on what it is, since there's no single "Library" concept anymore. Genre now displays alongside year and season count, pulled from the same TMDB call already being made, no extra cost.
+
+**Season browsing now works for shows not yet in your library too**, per your request, it's read-only (no watched-toggle) until you add the show, since a watch record needs something to attach to.
+
+**Movies' watched checkbox is now an animated pill at the bottom of the tile**, greys out or highlights on click with a small pop animation, replacing the checkbox.
+
+**On the stats question, checked your new file rather than assuming it would help**: `stats-prod-cache.csv` is exactly what its name says, a cache. It only covers an 11-month window (Aug 2025 to Jul 2026), not your full history, so it can't answer "how much have I watched total" even in principle. More importantly, I cross-checked it against my own method for that same window: my raw "first watch" event count for movies in that window is 120, TV Time's own cached count for the same window is also 120. That's real agreement, not a coincidence, and it validates the event-counting approach rather than pointing to a new bug. **The much more likely explanation for "still incorrect" is that the rewatch-counting fix from last round needs a re-import to apply** to episodes already in your database (I flagged this requirement at the time). Before I chase a new hypothesis: have you re-imported since that fix shipped? If yes and it's still off, tell me a specific show or movie where the number looks wrong and I'll trace that one specifically instead of guessing at another systemic cause.
+
+

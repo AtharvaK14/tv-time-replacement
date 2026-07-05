@@ -145,11 +145,13 @@ export default function Movies() {
                   <p className="show-name" onClick={() => setOpenDetails(m.tmdbId)}>
                     {m.title} {m.releaseYear ? `(${m.releaseYear})` : ""}
                   </p>
-                  <label className="muted small">
-                    <input type="checkbox" checked={m.watched} onChange={() => toggleWatched(m.tmdbId, m.watched)} />{" "}
-                    Watched
-                  </label>
                 </div>
+                <button
+                  className={`watched-pill ${m.watched ? "on" : ""}`}
+                  onClick={() => toggleWatched(m.tmdbId, m.watched)}
+                >
+                  {m.watched ? "Watched" : "Mark watched"}
+                </button>
               </div>
             ))}
           </div>

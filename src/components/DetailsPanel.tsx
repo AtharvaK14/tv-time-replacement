@@ -22,6 +22,7 @@ interface CoreDetails {
   episodeRuntimeMinutes?: number | null; // shows only
   runtimeMinutes?: number | null; // movies only
   imdbId?: string | null;
+  genres: string[];
 }
 
 export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
@@ -31,7 +32,9 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
   const [added, setAdded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Season accordion state, shows only, only relevant once the show is in the library.
+  // Season accordion state, shows only. Browsing is available whether or not
+  // the show is in your library, marking episodes watched requires adding
+  // it first (a watch record with nothing to attach it to doesn't make sense).
   const [seasonNumbers, setSeasonNumbers] = useState<number[] | null>(null);
   const [expandedSeason, setExpandedSeason] = useState<number | null>(null);
   const [loadingSeason, setLoadingSeason] = useState<number | null>(null);
@@ -55,12 +58,16 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
             numberOfSeasons: d.number_of_seasons,
             episodeRuntimeMinutes: averageRuntime(d.episode_run_time),
             imdbId: d.external_ids?.imdb_id ?? null,
+            genres: d.genres.map((g) => g.name),
           });
           const existing = await db.shows.get(tmdbId);
           setInLibrary(!!existing);
+          // Season list is available for browsing regardless of library
+          // status now, per feedback that previewing a show's seasons
+          // before adding it is useful, not just after.
+          const nums = await getSeasonNumbers(tmdbId);
+          if (!cancelled) setSeasonNumbers(nums);
           if (existing) {
-            const nums = await getSeasonNumbers(tmdbId);
-            if (!cancelled) setSeasonNumbers(nums);
             await refreshWatchedAndEpisodes();
           }
           if (hasOmdbKey()) {
@@ -83,6 +90,7 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
             overview: d.overview,
             runtimeMinutes: d.runtime,
             imdbId: d.external_ids?.imdb_id ?? null,
+            genres: d.genres.map((g) => g.name),
           });
           const existing = await db.movies.get(tmdbId);
           setInLibrary(!!existing);
@@ -132,6 +140,7 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
   }
 
   async function toggleEpisodeWatched(ep: Episode) {
+    if (!inLibrary) return; // browsing-only until added, see comment above
     if (watchedKeys.has(ep.key)) {
       await db.watchedEpisodes.delete(ep.key);
     } else {
@@ -148,6 +157,7 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
   }
 
   async function toggleSeasonWatched(seasonEpisodes: Episode[], markWatched: boolean) {
+    if (!inLibrary) return;
     if (markWatched) {
       await db.watchedEpisodes.bulkPut(
         seasonEpisodes.map((ep) => ({
@@ -181,8 +191,7 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
         episodeRuntimeMinutes: details.episodeRuntimeMinutes ?? null,
         imdbId: details.imdbId ?? null,
       });
-      const nums = await getSeasonNumbers(tmdbId);
-      setSeasonNumbers(nums);
+      await refreshWatchedAndEpisodes();
     } else {
       await db.movies.put({
         tmdbId,
@@ -208,7 +217,7 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
   }
   for (const list of episodesBySeason.values()) list.sort((a, b) => a.episodeNumber - b.episodeNumber);
 
-  const showsSeasonBrowser = kind === "show" && inLibrary && seasonNumbers !== null;
+  const showsSeasonBrowser = kind === "show" && seasonNumbers !== null;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -232,6 +241,7 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
                 <h2>{details.name}</h2>
                 <p className="muted small">
                   {details.releaseDate ? details.releaseDate.slice(0, 4) : "Release date unknown"}
+                  {details.genres.length > 0 ? ` \u00b7 ${details.genres.join(", ")}` : ""}
                   {details.numberOfSeasons
                     ? ` \u00b7 ${details.numberOfSeasons} season${details.numberOfSeasons === 1 ? "" : "s"}`
                     : ""}
@@ -261,15 +271,22 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
                 </p>
 
                 {inLibrary ? (
-                  <p className="status-ok">{added ? "Added to your library." : "Already in your library."}</p>
+                  <p className="status-ok">
+                    {added ? `Added to your ${kind === "show" ? "Shows" : "Movies"}.` : `Already in your ${kind === "show" ? "Shows" : "Movies"}.`}
+                  </p>
                 ) : (
-                  <button onClick={handleAdd}>Add to library</button>
+                  <button onClick={handleAdd}>{kind === "show" ? "Add to Shows" : "Add to Movies"}</button>
                 )}
               </div>
             </div>
 
             {showsSeasonBrowser && (
               <div className="season-browser">
+                {!inLibrary && (
+                  <p className="muted small" style={{ marginBottom: 10 }}>
+                    Previewing seasons and episodes. Add this show to your Shows to start tracking what you've watched.
+                  </p>
+                )}
                 {seasonNumbers!.map((seasonNumber) => {
                   const isExpanded = expandedSeason === seasonNumber;
                   const eps = episodesBySeason.get(seasonNumber) ?? [];
@@ -284,12 +301,12 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
                           {seasonNumber}
                         </h3>
                         <div className="season-header-right">
-                          {eps.length > 0 && (
+                          {inLibrary && eps.length > 0 && (
                             <span className="muted small">
                               {watchedCount}/{eps.length}
                             </span>
                           )}
-                          {isExpanded && eps.length > 0 && (
+                          {inLibrary && isExpanded && eps.length > 0 && (
                             <button
                               className="link-button"
                               onClick={(e) => {
@@ -330,14 +347,18 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
                                 </div>
                                 {/* Explicit, separate button, not sharing a <label> with the
                                     clickable row above, that's what caused viewing details to
-                                    also silently toggle watched state before. */}
-                                <button
-                                  className={`watch-toggle ${watchedKeys.has(ep.key) ? "on" : ""}`}
-                                  onClick={() => toggleEpisodeWatched(ep)}
-                                  aria-label={watchedKeys.has(ep.key) ? "Mark unwatched" : "Mark watched"}
-                                >
-                                  &#10003;
-                                </button>
+                                    also silently toggle watched state before. Hidden entirely
+                                    (not just disabled) when the show isn't in your library yet,
+                                    since there's nothing meaningful to toggle. */}
+                                {inLibrary && (
+                                  <button
+                                    className={`watch-toggle ${watchedKeys.has(ep.key) ? "on" : ""}`}
+                                    onClick={() => toggleEpisodeWatched(ep)}
+                                    aria-label={watchedKeys.has(ep.key) ? "Mark unwatched" : "Mark watched"}
+                                  >
+                                    &#10003;
+                                  </button>
+                                )}
                               </li>
                             ))}
                           </ul>
@@ -357,6 +378,7 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
           show={{ name: details.name, imdbId: details.imdbId }}
           episode={openEpisode}
           watched={watchedKeys.has(openEpisode.key)}
+          canToggleWatched={inLibrary}
           onToggleWatched={async () => {
             await toggleEpisodeWatched(openEpisode);
             setOpenEpisode(null);

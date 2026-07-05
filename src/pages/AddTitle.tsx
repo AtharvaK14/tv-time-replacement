@@ -105,7 +105,7 @@ export default function AddTitle() {
 
   return (
     <div className="panel">
-      <h2>Add a show or movie</h2>
+      <h2>Discover</h2>
       <div className="field-row">
         <select value={kind} onChange={(e) => setKind(e.target.value as "show" | "movie")}>
           <option value="show">TV show</option>
@@ -125,7 +125,7 @@ export default function AddTitle() {
 
       {hasSearched ? (
         <>
-          <p className="muted small">Tap a result to see details and add it to your library.</p>
+          <p className="muted small">Tap a result to see details and add it to your Shows or Movies.</p>
           {kind === "show" && (
             <ShowRow items={showResults} onOpen={(id) => setOpenDetails({ kind: "show", tmdbId: id })} />
           )}
@@ -138,14 +138,14 @@ export default function AddTitle() {
           <div className="discover-sections">
             {discoverError && <p className="status-error">Couldn't load suggestions: {discoverError}</p>}
 
-            <h3>Popular TV shows right now</h3>
+            <h3>Trending TV shows this week</h3>
             {!popularShows ? (
               <p className="muted small">Loading...</p>
             ) : (
               <ShowRow items={popularShows.slice(0, 10)} onOpen={(id) => setOpenDetails({ kind: "show", tmdbId: id })} />
             )}
 
-            <h3 style={{ marginTop: 20 }}>Popular movies right now</h3>
+            <h3 style={{ marginTop: 20 }}>Trending movies this week</h3>
             {!popularMovies ? (
               <p className="muted small">Loading...</p>
             ) : (

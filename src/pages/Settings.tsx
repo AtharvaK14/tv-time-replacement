@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { verifyApiKey } from "../tmdb";
 import { verifyOmdbKey } from "../omdb";
+import ImportWizard from "./ImportWizard";
+import Diagnostics from "./Diagnostics";
 
 type KeyStatus = "idle" | "checking" | "valid" | "invalid";
 
@@ -94,6 +96,21 @@ export default function Settings() {
         Required attribution, per TMDB's terms: this product uses the TMDB API but is not endorsed or certified by
         TMDB. OMDb content is CC BY-NC 4.0, non-commercial use only, same as this app.
       </p>
+
+      <hr />
+      <details>
+        <summary><h3 style={{ display: "inline" }}>Import from TV Time</h3></summary>
+        <div style={{ marginTop: 14 }}>
+          <ImportWizard />
+        </div>
+      </details>
+
+      <details>
+        <summary><h3 style={{ display: "inline" }}>Diagnostics</h3></summary>
+        <div style={{ marginTop: 14 }}>
+          <Diagnostics />
+        </div>
+      </details>
     </div>
   );
 }

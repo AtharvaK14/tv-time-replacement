@@ -7,11 +7,12 @@ interface Props {
   show: { name: string; imdbId?: string | null };
   episode: Episode;
   watched: boolean;
+  canToggleWatched?: boolean;
   onToggleWatched: () => void;
   onClose: () => void;
 }
 
-export default function EpisodeDetailsPanel({ show, episode, watched, onToggleWatched, onClose }: Props) {
+export default function EpisodeDetailsPanel({ show, episode, watched, canToggleWatched = true, onToggleWatched, onClose }: Props) {
   const [rating, setRating] = useState<OmdbEpisodeRating | null | "loading">("loading");
 
   useEffect(() => {
@@ -77,7 +78,9 @@ export default function EpisodeDetailsPanel({ show, episode, watched, onToggleWa
                 pattern (a checkbox/label sharing space with a clickable sibling) was the root
                 cause of a real bug where opening episode details also silently toggled its
                 watched state. Keeping these fully separate interactive elements on purpose. */}
-            <button onClick={onToggleWatched}>{watched ? "Mark unwatched" : "Mark watched"}</button>
+            {canToggleWatched && (
+              <button onClick={onToggleWatched}>{watched ? "Mark unwatched" : "Mark watched"}</button>
+            )}
           </div>
         </div>
       </div>
