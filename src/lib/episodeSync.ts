@@ -1,7 +1,18 @@
 import { db, episodeKey, type Episode } from "../db";
 import { getTvShowDetails, getSeasonDetails } from "../tmdb";
 
-function toEpisodeRecords(tmdbId: number, seasonNumber: number, episodes: { episode_number: number; name: string; overview: string | null; air_date: string | null; vote_average: number }[]): Episode[] {
+function toEpisodeRecords(
+  tmdbId: number,
+  seasonNumber: number,
+  episodes: {
+    episode_number: number;
+    name: string;
+    overview: string | null;
+    air_date: string | null;
+    vote_average: number;
+    still_path: string | null;
+  }[]
+): Episode[] {
   return episodes.map((ep) => ({
     key: episodeKey(tmdbId, seasonNumber, ep.episode_number),
     showId: tmdbId,
@@ -11,6 +22,7 @@ function toEpisodeRecords(tmdbId: number, seasonNumber: number, episodes: { epis
     overview: ep.overview,
     airDate: ep.air_date,
     tmdbRating: ep.vote_average,
+    stillPath: ep.still_path,
   }));
 }
 

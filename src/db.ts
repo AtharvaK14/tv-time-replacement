@@ -12,6 +12,9 @@ export interface Show {
   isFollowed: boolean; // from TV Time's user-series follow record, or true if added manually
   isArchived: boolean; // TV Time's archived flag; still has history, just not active
   lastWatchedAt: string | null; // ISO timestamp, max(watched episode timestamp) for this show
+  episodeRuntimeMinutes?: number | null; // average from TMDB's episode_run_time, undefined until backfilled for pre-existing rows
+  genreIds?: number[]; // TMDB genre IDs, for the genre filter
+  imdbId?: string | null; // from TMDB's external_ids, used for accurate OMDb lookups instead of title matching
 }
 
 export interface Episode {
@@ -24,6 +27,7 @@ export interface Episode {
   overview: string | null;
   airDate: string | null;
   tmdbRating: number; // TMDB's own vote_average, 0-10, always free, distinct from IMDb's rating
+  stillPath: string | null; // episode thumbnail image
 }
 
 export interface WatchedEpisode {
@@ -31,7 +35,8 @@ export interface WatchedEpisode {
   showId: number;
   seasonNumber: number;
   episodeNumber: number;
-  watchedAt: string; // ISO timestamp, from TV Time's created_at when imported
+  watchedAt: string; // ISO timestamp of the first watch, from TV Time's earliest event for this episode
+  watchCount: number; // total watch + rewatch events for this episode, for accurate time-watched stats
 }
 
 export interface Movie {
@@ -42,6 +47,10 @@ export interface Movie {
   watched: boolean;
   watchedAt: string | null;
   wantsToWatch: boolean; // from TV Time's 'follow'/'towatch' events, true even before watched
+  runtimeMinutes?: number | null; // undefined until backfilled for pre-existing rows
+  rewatchCount?: number; // additional watches beyond the first, from counted 'rewatch' events (verified more reliable than TV Time's own rewatch_count field)
+  genreIds?: number[]; // TMDB genre IDs, for the genre filter
+  imdbId?: string | null; // from TMDB's external_ids, used for accurate OMDb lookups instead of title matching
 }
 
 // Remembers how a raw TV Time title string was resolved, so re-running an
@@ -108,6 +117,43 @@ class TrackerDB extends Dexie {
         settings: "key",
       })
       .upgrade((tx) => tx.table("episodes").clear());
+    // v4: added episodeRuntimeMinutes (shows) and runtimeMinutes (movies) for
+    // the Stats page's time-watched totals. No index changes, so Dexie
+    // doesn't strictly require a version bump here, but bumping anyway for
+    // a consistent audit trail. Existing rows get undefined until Stats.tsx
+    // backfills them on first visit.
+    this.version(4).stores({
+      shows: "tmdbId, name, isFollowed, lastWatchedAt",
+      episodes: "key, showId, [showId+seasonNumber]",
+      watchedEpisodes: "key, showId, watchedAt",
+      movies: "tmdbId, title, watched, wantsToWatch",
+      titleMatches: "rawTitle, kind",
+      settings: "key",
+    });
+    // v5: added stillPath (Episode), watchCount (WatchedEpisode), and
+    // rewatchCount/genreIds/imdbId (Show, Movie).
+    //
+    // IMPORTANT: only the `episodes` table is cleared here. It's a pure TMDB
+    // cache, always safely re-fetchable, losing it costs an API call, not
+    // data. watchedEpisodes and movies are NEVER cleared in any migration,
+    // they hold your actual watch history and manual edits, there is no
+    // TMDB call that could reconstruct that if it were lost.
+    //
+    // Consequence: existing WatchedEpisode/Movie rows will have
+    // watchCount/rewatchCount as undefined until you either edit them
+    // individually or re-run the CSV import (which overwrites by primary
+    // key with freshly counted values, safe and idempotent, already true
+    // of every import run since titleMatches caching was added). Until
+    // then, code reading these fields must treat undefined as "assume 1
+    // watch", not as zero or an error.
+    this.version(5).stores({
+      shows: "tmdbId, name, isFollowed, lastWatchedAt",
+      episodes: "key, showId, [showId+seasonNumber]",
+      watchedEpisodes: "key, showId, watchedAt",
+      movies: "tmdbId, title, watched, wantsToWatch",
+      titleMatches: "rawTitle, kind",
+      settings: "key",
+    }).upgrade((tx) => tx.table("episodes").clear());
   }
 }
 

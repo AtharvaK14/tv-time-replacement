@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
 import type { Episode } from "../db";
+import { TMDB_IMAGE_BASE } from "../tmdb";
 import { getOmdbEpisodeRating, hasOmdbKey, type OmdbEpisodeRating } from "../omdb";
 
 interface Props {
-  showName: string;
+  show: { name: string; imdbId?: string | null };
   episode: Episode;
   watched: boolean;
   onToggleWatched: () => void;
   onClose: () => void;
 }
 
-export default function EpisodeDetailsPanel({ showName, episode, watched, onToggleWatched, onClose }: Props) {
+export default function EpisodeDetailsPanel({ show, episode, watched, onToggleWatched, onClose }: Props) {
   const [rating, setRating] = useState<OmdbEpisodeRating | null | "loading">("loading");
 
   useEffect(() => {
@@ -21,14 +22,14 @@ export default function EpisodeDetailsPanel({ showName, episode, watched, onTogg
         return;
       }
       setRating("loading");
-      const r = await getOmdbEpisodeRating(showName, episode.seasonNumber, episode.episodeNumber);
+      const r = await getOmdbEpisodeRating({ title: show.name, imdbId: show.imdbId }, episode.seasonNumber, episode.episodeNumber);
       if (!cancelled) setRating(r);
     }
     load();
     return () => {
       cancelled = true;
     };
-  }, [showName, episode.seasonNumber, episode.episodeNumber]);
+  }, [show, episode.seasonNumber, episode.episodeNumber]);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -37,31 +38,48 @@ export default function EpisodeDetailsPanel({ showName, episode, watched, onTogg
           &times;
         </button>
 
-        <p className="muted small">
-          {showName} &middot; Season {episode.seasonNumber}, Episode {episode.episodeNumber}
-        </p>
-        <h2>{episode.name}</h2>
-        <p className="muted small">{episode.airDate || "Air date unknown"}</p>
+        <div className="details-layout">
+          {episode.stillPath ? (
+            <img
+              src={`${TMDB_IMAGE_BASE}${episode.stillPath}`}
+              alt={episode.name}
+              className="details-poster episode-still"
+            />
+          ) : (
+            <div className="poster-placeholder details-poster episode-still" />
+          )}
+          <div className="details-body">
+            <p className="muted small">
+              {show.name} &middot; Season {episode.seasonNumber}, Episode {episode.episodeNumber}
+            </p>
+            <h2>{episode.name}</h2>
+            <p className="muted small">{episode.airDate || "Air date unknown"}</p>
 
-        <div className="ratings-row">
-          <span className="rating-pill">TMDB {episode.tmdbRating.toFixed(1)}</span>
-          {rating === "loading" && hasOmdbKey() && <span className="muted small">Loading IMDb rating...</span>}
-          {rating && rating !== "loading" && rating.imdbRating && (
-            <span className="rating-pill">IMDb {rating.imdbRating}</span>
-          )}
-          {rating && rating !== "loading" && !rating.imdbRating && (
-            <span className="muted small">No IMDb rating found for this episode.</span>
-          )}
-          {!hasOmdbKey() && <span className="muted small">Add an OMDb key in Settings to see IMDb ratings.</span>}
+            <div className="ratings-row">
+              <span className="rating-pill">TMDB {episode.tmdbRating.toFixed(1)}</span>
+              {rating === "loading" && hasOmdbKey() && <span className="muted small">Loading IMDb rating...</span>}
+              {rating && rating !== "loading" && rating.imdbRating && (
+                <span className="rating-pill">IMDb {rating.imdbRating}</span>
+              )}
+              {rating && rating !== "loading" && !rating.imdbRating && (
+                <span className="muted small">
+                  {rating.error ? `OMDb: ${rating.error}` : "No IMDb rating found for this episode."}
+                </span>
+              )}
+              {!hasOmdbKey() && <span className="muted small">Add an OMDb key in Settings to see IMDb ratings.</span>}
+            </div>
+
+            <p className="overview">
+              {episode.overview || (rating !== "loading" && rating?.plot) || "No summary available."}
+            </p>
+
+            {/* Deliberately a plain button, not a <label> wrapping anything else, this exact
+                pattern (a checkbox/label sharing space with a clickable sibling) was the root
+                cause of a real bug where opening episode details also silently toggled its
+                watched state. Keeping these fully separate interactive elements on purpose. */}
+            <button onClick={onToggleWatched}>{watched ? "Mark unwatched" : "Mark watched"}</button>
+          </div>
         </div>
-
-        <p className="overview">
-          {episode.overview || (rating !== "loading" && rating?.plot) || "No summary available."}
-        </p>
-
-        <label className="muted small">
-          <input type="checkbox" checked={watched} onChange={onToggleWatched} /> Watched
-        </label>
       </div>
     </div>
   );

@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
-import { db } from "../db";
+import { db, type Episode } from "../db";
 import { getTvShowDetails, getMovieDetails, TMDB_IMAGE_BASE } from "../tmdb";
 import { getOmdbRatings, hasOmdbKey, type OmdbRatings } from "../omdb";
+import { averageRuntime } from "../lib/runtime";
+import { getSeasonNumbers, ensureSeasonCached } from "../lib/episodeSync";
+import EpisodeDetailsPanel from "./EpisodeDetailsPanel";
 
 interface Props {
   kind: "show" | "movie";
@@ -15,6 +18,10 @@ interface CoreDetails {
   releaseDate: string | null;
   overview: string | null;
   status?: string; // shows only
+  numberOfSeasons?: number; // shows only
+  episodeRuntimeMinutes?: number | null; // shows only
+  runtimeMinutes?: number | null; // movies only
+  imdbId?: string | null;
 }
 
 export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
@@ -23,6 +30,14 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
   const [inLibrary, setInLibrary] = useState(false);
   const [added, setAdded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Season accordion state, shows only, only relevant once the show is in the library.
+  const [seasonNumbers, setSeasonNumbers] = useState<number[] | null>(null);
+  const [expandedSeason, setExpandedSeason] = useState<number | null>(null);
+  const [loadingSeason, setLoadingSeason] = useState<number | null>(null);
+  const [episodesInDb, setEpisodesInDb] = useState<Episode[]>([]);
+  const [watchedKeys, setWatchedKeys] = useState<Set<string>>(new Set());
+  const [openEpisode, setOpenEpisode] = useState<Episode | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -37,11 +52,23 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
             releaseDate: d.first_air_date,
             overview: d.overview,
             status: d.status,
+            numberOfSeasons: d.number_of_seasons,
+            episodeRuntimeMinutes: averageRuntime(d.episode_run_time),
+            imdbId: d.external_ids?.imdb_id ?? null,
           });
           const existing = await db.shows.get(tmdbId);
           setInLibrary(!!existing);
+          if (existing) {
+            const nums = await getSeasonNumbers(tmdbId);
+            if (!cancelled) setSeasonNumbers(nums);
+            await refreshWatchedAndEpisodes();
+          }
           if (hasOmdbKey()) {
-            const r = await getOmdbRatings(d.name, d.first_air_date ? Number(d.first_air_date.slice(0, 4)) : null);
+            const r = await getOmdbRatings({
+              imdbId: d.external_ids?.imdb_id,
+              title: d.name,
+              year: d.first_air_date ? Number(d.first_air_date.slice(0, 4)) : null,
+            });
             if (!cancelled) setRatings(r);
           } else {
             setRatings(null);
@@ -54,11 +81,17 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
             posterPath: d.poster_path,
             releaseDate: d.release_date,
             overview: d.overview,
+            runtimeMinutes: d.runtime,
+            imdbId: d.external_ids?.imdb_id ?? null,
           });
           const existing = await db.movies.get(tmdbId);
           setInLibrary(!!existing);
           if (hasOmdbKey()) {
-            const r = await getOmdbRatings(d.title, d.release_date ? Number(d.release_date.slice(0, 4)) : null);
+            const r = await getOmdbRatings({
+              imdbId: d.external_ids?.imdb_id,
+              title: d.title,
+              year: d.release_date ? Number(d.release_date.slice(0, 4)) : null,
+            });
             if (!cancelled) setRatings(r);
           } else {
             setRatings(null);
@@ -72,7 +105,65 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, tmdbId]);
+
+  async function refreshWatchedAndEpisodes() {
+    const [eps, watched] = await Promise.all([
+      db.episodes.where("showId").equals(tmdbId).toArray(),
+      db.watchedEpisodes.where("showId").equals(tmdbId).toArray(),
+    ]);
+    setEpisodesInDb(eps);
+    setWatchedKeys(new Set(watched.map((w) => w.key)));
+  }
+
+  async function toggleExpand(seasonNumber: number) {
+    if (expandedSeason === seasonNumber) {
+      setExpandedSeason(null);
+      return;
+    }
+    setExpandedSeason(seasonNumber);
+    if (!episodesInDb.some((e) => e.seasonNumber === seasonNumber)) {
+      setLoadingSeason(seasonNumber);
+      await ensureSeasonCached(tmdbId, seasonNumber);
+      await refreshWatchedAndEpisodes();
+      setLoadingSeason(null);
+    }
+  }
+
+  async function toggleEpisodeWatched(ep: Episode) {
+    if (watchedKeys.has(ep.key)) {
+      await db.watchedEpisodes.delete(ep.key);
+    } else {
+      await db.watchedEpisodes.put({
+        key: ep.key,
+        showId: ep.showId,
+        seasonNumber: ep.seasonNumber,
+        episodeNumber: ep.episodeNumber,
+        watchedAt: new Date().toISOString(),
+        watchCount: 1,
+      });
+    }
+    await refreshWatchedAndEpisodes();
+  }
+
+  async function toggleSeasonWatched(seasonEpisodes: Episode[], markWatched: boolean) {
+    if (markWatched) {
+      await db.watchedEpisodes.bulkPut(
+        seasonEpisodes.map((ep) => ({
+          key: ep.key,
+          showId: ep.showId,
+          seasonNumber: ep.seasonNumber,
+          episodeNumber: ep.episodeNumber,
+          watchedAt: new Date().toISOString(),
+          watchCount: 1,
+        }))
+      );
+    } else {
+      await db.watchedEpisodes.bulkDelete(seasonEpisodes.map((ep) => ep.key));
+    }
+    await refreshWatchedAndEpisodes();
+  }
 
   async function handleAdd() {
     if (!details) return;
@@ -87,7 +178,11 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
         isFollowed: true,
         isArchived: false,
         lastWatchedAt: null,
+        episodeRuntimeMinutes: details.episodeRuntimeMinutes ?? null,
+        imdbId: details.imdbId ?? null,
       });
+      const nums = await getSeasonNumbers(tmdbId);
+      setSeasonNumbers(nums);
     } else {
       await db.movies.put({
         tmdbId,
@@ -97,66 +192,178 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
         watched: false,
         watchedAt: null,
         wantsToWatch: true,
+        runtimeMinutes: details.runtimeMinutes ?? null,
+        imdbId: details.imdbId ?? null,
       });
     }
     setInLibrary(true);
     setAdded(true);
   }
 
+  const episodesBySeason = new Map<number, Episode[]>();
+  for (const ep of episodesInDb) {
+    const list = episodesBySeason.get(ep.seasonNumber);
+    if (list) list.push(ep);
+    else episodesBySeason.set(ep.seasonNumber, [ep]);
+  }
+  for (const list of episodesBySeason.values()) list.sort((a, b) => a.episodeNumber - b.episodeNumber);
+
+  const showsSeasonBrowser = kind === "show" && inLibrary && seasonNumbers !== null;
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal details-modal" onClick={(e) => e.stopPropagation()}>
+      <div className={`modal details-modal ${showsSeasonBrowser ? "details-modal-wide" : ""}`} onClick={(e) => e.stopPropagation()}>
         <button className="close-x" onClick={onClose} aria-label="Close">
           &times;
         </button>
 
         {error && <p className="status-error">{error}</p>}
-
         {!details && !error && <p className="muted">Loading...</p>}
 
         {details && (
-          <div className="details-layout">
-            {details.posterPath ? (
-              <img src={`${TMDB_IMAGE_BASE}${details.posterPath}`} alt={details.name} className="details-poster" />
-            ) : (
-              <div className="poster-placeholder details-poster" />
-            )}
-            <div className="details-body">
-              <h2>{details.name}</h2>
-              <p className="muted small">
-                {details.releaseDate ? details.releaseDate.slice(0, 4) : "Release date unknown"}
-                {details.status ? ` \u00b7 ${details.status}` : ""}
-              </p>
+          <>
+            <div className="details-layout">
+              {details.posterPath ? (
+                <img src={`${TMDB_IMAGE_BASE}${details.posterPath}`} alt={details.name} className="details-poster" />
+              ) : (
+                <div className="poster-placeholder details-poster" />
+              )}
+              <div className="details-body">
+                <h2>{details.name}</h2>
+                <p className="muted small">
+                  {details.releaseDate ? details.releaseDate.slice(0, 4) : "Release date unknown"}
+                  {details.numberOfSeasons
+                    ? ` \u00b7 ${details.numberOfSeasons} season${details.numberOfSeasons === 1 ? "" : "s"}`
+                    : ""}
+                  {details.status ? ` \u00b7 ${details.status}` : ""}
+                </p>
 
-              <div className="ratings-row">
-                {ratings === "loading" && hasOmdbKey() && <span className="muted small">Loading ratings...</span>}
-                {ratings && ratings !== "loading" && (
-                  <>
-                    {ratings.imdbRating && <span className="rating-pill">IMDb {ratings.imdbRating}</span>}
-                    {ratings.rottenTomatoes && <span className="rating-pill">RT {ratings.rottenTomatoes}</span>}
-                    {!ratings.imdbRating && !ratings.rottenTomatoes && (
-                      <span className="muted small">No ratings found for this title on OMDb.</span>
-                    )}
-                  </>
-                )}
-                {!hasOmdbKey() && (
-                  <span className="muted small">Add an OMDb key in Settings to see IMDb/RT ratings.</span>
+                <div className="ratings-row">
+                  {ratings === "loading" && hasOmdbKey() && <span className="muted small">Loading ratings...</span>}
+                  {ratings && ratings !== "loading" && (
+                    <>
+                      {ratings.imdbRating && <span className="rating-pill">IMDb {ratings.imdbRating}</span>}
+                      {ratings.rottenTomatoes && <span className="rating-pill">RT {ratings.rottenTomatoes}</span>}
+                      {!ratings.imdbRating && !ratings.rottenTomatoes && (
+                        <span className="muted small">
+                          {ratings.error ? `OMDb: ${ratings.error}` : "No ratings found for this title on OMDb."}
+                        </span>
+                      )}
+                    </>
+                  )}
+                  {!hasOmdbKey() && (
+                    <span className="muted small">Add an OMDb key in Settings to see IMDb/RT ratings.</span>
+                  )}
+                </div>
+
+                <p className="overview">
+                  {details.overview || (ratings !== "loading" && ratings?.plot) || "No summary available."}
+                </p>
+
+                {inLibrary ? (
+                  <p className="status-ok">{added ? "Added to your library." : "Already in your library."}</p>
+                ) : (
+                  <button onClick={handleAdd}>Add to library</button>
                 )}
               </div>
-
-              <p className="overview">
-                {details.overview || (ratings !== "loading" && ratings?.plot) || "No summary available."}
-              </p>
-
-              {inLibrary ? (
-                <p className="status-ok">{added ? "Added to your library." : "Already in your library."}</p>
-              ) : (
-                <button onClick={handleAdd}>Add to library</button>
-              )}
             </div>
-          </div>
+
+            {showsSeasonBrowser && (
+              <div className="season-browser">
+                {seasonNumbers!.map((seasonNumber) => {
+                  const isExpanded = expandedSeason === seasonNumber;
+                  const eps = episodesBySeason.get(seasonNumber) ?? [];
+                  const watchedCount = eps.filter((e) => watchedKeys.has(e.key)).length;
+                  const allWatched = eps.length > 0 && watchedCount === eps.length;
+
+                  return (
+                    <div key={seasonNumber} className="season-block">
+                      <div className="season-header season-toggle" onClick={() => toggleExpand(seasonNumber)}>
+                        <h3>
+                          <span className={`season-caret ${isExpanded ? "open" : ""}`}>&#9656;</span> Season{" "}
+                          {seasonNumber}
+                        </h3>
+                        <div className="season-header-right">
+                          {eps.length > 0 && (
+                            <span className="muted small">
+                              {watchedCount}/{eps.length}
+                            </span>
+                          )}
+                          {isExpanded && eps.length > 0 && (
+                            <button
+                              className="link-button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleSeasonWatched(eps, !allWatched);
+                              }}
+                            >
+                              {allWatched ? "Mark unwatched" : "Mark watched"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {isExpanded && (
+                        <>
+                          {loadingSeason === seasonNumber && <p className="muted small">Fetching episodes...</p>}
+                          <ul className="episode-list">
+                            {eps.map((ep) => (
+                              <li
+                                key={ep.key}
+                                className={`episode-row ${watchedKeys.has(ep.key) ? "watched" : ""}`}
+                              >
+                                {ep.stillPath ? (
+                                  <img
+                                    src={`${TMDB_IMAGE_BASE}${ep.stillPath}`}
+                                    alt=""
+                                    className="episode-thumb"
+                                    onClick={() => setOpenEpisode(ep)}
+                                  />
+                                ) : (
+                                  <div className="episode-thumb poster-placeholder" onClick={() => setOpenEpisode(ep)} />
+                                )}
+                                <div className="episode-row-body" onClick={() => setOpenEpisode(ep)}>
+                                  <span className="ep-number">
+                                    S{ep.seasonNumber} | E{ep.episodeNumber}
+                                  </span>
+                                  <span className="ep-name">{ep.name}</span>
+                                </div>
+                                {/* Explicit, separate button, not sharing a <label> with the
+                                    clickable row above, that's what caused viewing details to
+                                    also silently toggle watched state before. */}
+                                <button
+                                  className={`watch-toggle ${watchedKeys.has(ep.key) ? "on" : ""}`}
+                                  onClick={() => toggleEpisodeWatched(ep)}
+                                  aria-label={watchedKeys.has(ep.key) ? "Mark unwatched" : "Mark watched"}
+                                >
+                                  &#10003;
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
         )}
       </div>
+
+      {openEpisode && details && (
+        <EpisodeDetailsPanel
+          show={{ name: details.name, imdbId: details.imdbId }}
+          episode={openEpisode}
+          watched={watchedKeys.has(openEpisode.key)}
+          onToggleWatched={async () => {
+            await toggleEpisodeWatched(openEpisode);
+            setOpenEpisode(null);
+          }}
+          onClose={() => setOpenEpisode(null)}
+        />
+      )}
     </div>
   );
 }

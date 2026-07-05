@@ -22,26 +22,37 @@ export interface OmdbRatings {
   imdbRating: string | null; // e.g. "8.8"
   rottenTomatoes: string | null; // e.g. "87%", movies only per OMDb's own data, often absent for series
   plot: string | null;
+  error: string | null;
 }
 
 /**
- * Looks up ratings by title and year. Returns null if OMDb has no key set,
- * has no match, or the request fails, callers should treat missing ratings
- * as "unavailable", not as an error to surface loudly.
+ * Looks up ratings by IMDb ID when available (exact, no ambiguity), falling
+ * back to title+year search only when no ID is cached (e.g. a record added
+ * before TMDB's external_ids were being fetched). Title-based fallback can
+ * match the wrong same-named title, that's a known, real limitation, not a
+ * silent risk, callers should prefer passing an imdbId whenever possible.
  */
-export async function getOmdbRatings(title: string, year: number | null): Promise<OmdbRatings | null> {
+export async function getOmdbRatings(
+  identifier: { imdbId?: string | null; title: string; year: number | null }
+): Promise<OmdbRatings | null> {
   const key = getOmdbKey();
   if (!key) return null;
 
   const url = new URL(OMDB_BASE);
   url.searchParams.set("apikey", key);
-  url.searchParams.set("t", title);
-  if (year) url.searchParams.set("y", String(year));
+  if (identifier.imdbId) {
+    url.searchParams.set("i", identifier.imdbId);
+  } else {
+    url.searchParams.set("t", identifier.title);
+    if (identifier.year) url.searchParams.set("y", String(identifier.year));
+  }
 
   const res = await fetch(url.toString());
-  if (!res.ok) return null;
+  if (!res.ok) return { imdbRating: null, rottenTomatoes: null, plot: null, error: `HTTP ${res.status}` };
   const data = await res.json();
-  if (data.Response !== "True") return null;
+  if (data.Response !== "True") {
+    return { imdbRating: null, rottenTomatoes: null, plot: null, error: data.Error ?? "Unknown OMDb error" };
+  }
 
   const ratingsArray: { Source: string; Value: string }[] = data.Ratings ?? [];
   const imdb = ratingsArray.find((r) => r.Source === "Internet Movie Database")?.Value ?? data.imdbRating ?? null;
@@ -51,6 +62,7 @@ export async function getOmdbRatings(title: string, year: number | null): Promis
     imdbRating: imdb && imdb !== "N/A" ? imdb : null,
     rottenTomatoes: rt ?? null,
     plot: data.Plot && data.Plot !== "N/A" ? data.Plot : null,
+    error: null,
   };
 }
 
@@ -58,21 +70,17 @@ export interface OmdbEpisodeRating {
   imdbRating: string | null;
   imdbId: string | null;
   plot: string | null;
+  error: string | null; // OMDb's own error message when Response=False, e.g. "Series not found!"
 }
 
 /**
- * Per-episode IMDb rating via OMDb's documented Season+Episode query params
- * (?t=<show>&Season=X&Episode=Y), added per OMDb's own changelog. This is a
- * SEPARATE lookup from the show-level rating, IMDb rates each episode of a
- * series individually.
- *
- * NOTE: this has been implemented against OMDb's documented parameters but
- * not yet run against a live key in this environment. If it returns nulls
- * across the board, check the raw response shape first, don't assume the
- * params are wrong before verifying.
+ * Per-episode IMDb rating via OMDb's documented Season+Episode query params.
+ * Prefers the show's IMDb ID (?i=<id>&Season=X&Episode=Y, confirmed working
+ * per OMDb's own changelog, 11/16/15) over title matching, for the same
+ * exact-match-vs-ambiguous-title reason as getOmdbRatings above.
  */
 export async function getOmdbEpisodeRating(
-  showTitle: string,
+  show: { imdbId?: string | null; title: string },
   seasonNumber: number,
   episodeNumber: number
 ): Promise<OmdbEpisodeRating | null> {
@@ -81,18 +89,27 @@ export async function getOmdbEpisodeRating(
 
   const url = new URL(OMDB_BASE);
   url.searchParams.set("apikey", key);
-  url.searchParams.set("t", showTitle);
+  if (show.imdbId) {
+    url.searchParams.set("i", show.imdbId);
+  } else {
+    url.searchParams.set("t", show.title);
+  }
   url.searchParams.set("Season", String(seasonNumber));
   url.searchParams.set("Episode", String(episodeNumber));
 
   const res = await fetch(url.toString());
-  if (!res.ok) return null;
+  if (!res.ok) {
+    return { imdbRating: null, imdbId: null, plot: null, error: `HTTP ${res.status}` };
+  }
   const data = await res.json();
-  if (data.Response !== "True") return null;
+  if (data.Response !== "True") {
+    return { imdbRating: null, imdbId: null, plot: null, error: data.Error ?? "Unknown OMDb error" };
+  }
 
   return {
     imdbRating: data.imdbRating && data.imdbRating !== "N/A" ? data.imdbRating : null,
     imdbId: data.imdbID || null,
     plot: data.Plot && data.Plot !== "N/A" ? data.Plot : null,
+    error: null,
   };
 }

@@ -167,4 +167,71 @@ src/
     AddTitle.tsx               Search TMDB, opens DetailsPanel to add
     ImportWizard.tsx            TV Time CSV import with disambiguation UI
     Settings.tsx                TMDB + OMDb API keys
+    Stats.tsx                   Time-watched totals, self-healing runtime backfill
+    Diagnostics.tsx              Stored-data vs TMDB comparison for bug reports
 ```
+
+## This round: UI additions, a real CSS bug fix, and one bug still needs your diagnostic run
+
+**Fixed, verified by code review:**
+- Poster stretching in the details panel was a real CSS bug, not a sizing
+  preference: `.details-layout` was `display: flex` with no `align-items`
+  set, which defaults to `stretch`, vertically distorting the poster to
+  match its taller text sibling. Fixed with `align-items: flex-start` plus
+  an explicit `aspect-ratio` on the poster as a defensive backstop.
+- Season count now shows between release year and status in the details
+  panel, from TMDB's `number_of_seasons` field (already being fetched,
+  wasn't being displayed).
+
+**Added:**
+- Search, sort, and filter on both Shows and Movies pages.
+- A Shows/Movies toggle on Home. Movies' equivalent of "Watch Next" is your
+  want-to-watch list (movies aren't episodic, so "haven't watched in a
+  while" doesn't apply the same way).
+- A Stats page (TV time, episodes watched, movie time, movies watched).
+  **TV time is an estimate**, not exact: watched-episode-count times TMDB's
+  average episode runtime for that show, because getting the actual runtime
+  of every individual episode watched would mean one extra API call per
+  episode, not per show. Movie time uses each movie's real runtime, that
+  number is exact. Said plainly in the Stats page itself, not just here.
+  Shows/movies added before this feature existed get their runtime
+  backfilled automatically the first time you open Stats (one-time cost).
+- A Diagnostics page. Pick a show, see exactly what's stored in your local
+  database versus what TMDB reports, side by side.
+
+**NOT fixed yet, because I can't verify it from here:**
+
+- **The Watch Next / Haven't Watched For a While bug you reported.** I
+  checked one specific hypothesis (whether TV Time's bulk "mark season
+  watched" actions produce rows without real episode numbers) against your
+  actual CSV data and ruled it out: Arrow alone has 170 distinct
+  individually-numbered watched episodes out of ~171 total in the raw
+  export, the source data is fine. That means the bug is somewhere in the
+  live import run or the TMDB matching, something I can't observe without
+  your browser's actual IndexedDB contents. Use the new Diagnostics page on
+  Arrow specifically and send me the output, that will show directly
+  whether it's a numbering mismatch, a wrong TMDB match, or something else,
+  instead of another round of guessing.
+- **The episode-level IMDb rating issue.** I don't know the actual failure
+  mode you're seeing (blank, wrong number, error). The panel now shows
+  OMDb's own error message when the lookup fails (e.g. "Series not found!")
+  instead of a generic blank, so whatever you see next should point at the
+  real cause directly.
+
+## This round: a real root-cause bug fix, ID-based ratings, rewatch-aware stats, and a UI restructure
+
+**The most important fix: clicking an episode to view details was also toggling its watched state.** Confirmed by reading the actual markup, not guessed: the checkbox and the clickable episode name were both inside the same `<label>` element. Clicking *anywhere* inside a `<label>` wrapping a checkbox forwards that click to the checkbox by native browser behavior, `stopPropagation()` on the checkbox itself can't stop this, because it's the label's own default action, not a bubbled event. This means every exploratory click on an episode name was silently flipping its watched state.
+
+**This is very likely a major cause of the Home bug you kept seeing** (already-watched shows appearing in Haven't Watched, currently-watching shows not appearing). Fixing the code stops it happening *going forward*, it does not undo damage already sitting in your IndexedDB from before. **Re-run the import after updating**, it overwrites watch history by primary key straight from your CSV regardless of current state, which will restore anything the bug already corrupted. If shows still look wrong after that, use the Diagnostics tab and send me the output, that's real signal, not another guess.
+
+**Ratings were being looked up by title, which can match the wrong same-named title.** Fixed by using TMDB's `external_ids` (confirmed in their own docs, fetched in the same call as the existing details request, no extra API cost) to get the real IMDb ID, then querying OMDb by `i=<id>` instead of by title. Verified this parameter works from OMDb's own changelog (`i=` plus `Season`/`Episode` added 11/16/15). This should fix the wrong-rating reports, but I can't confirm that without your live key, tell me if it's still wrong for a specific title and I'll look at that one directly.
+
+**TV time was undercounting because rewatches were being discarded.** Checked this against your real data rather than assuming: 28.6% of all episode watch events in your export are rewatches, not a rounding error. The importer used to keep only the earliest watch event per episode and discard the rest, meaning rewatches contributed nothing to total time watched. Now every watch event is counted (`watchCount` per episode), while still using the earliest date for "when did I first watch this." **This also needs a re-import to take effect** for episodes you already have; existing rows default to assuming 1 watch until re-imported. Same fix applied to movies, using counted `rewatch` events rather than TV Time's own `rewatch_count` field, which was checked and found unreliable (44% mismatch against actual counted events in your data, always under-reporting).
+
+**UI restructure:**
+- Season/episode browsing now lives inside the same details panel modal used everywhere else, not a separate page. Episode rows show TMDB's thumbnail image. The watched-toggle is a separate, explicit button, deliberately not sharing a label with anything clickable, by construction this time, not a patch.
+- Stats moved into the Shows and Movies pages themselves (Months/Days/Hours format, matching TV Time's own display), the standalone Stats tab is gone.
+- Added a "Currently Watching" filter and a genre filter to Shows. Currently Watching relies on episode data already being cached locally (from Home's sync or having opened a show), it deliberately doesn't force a TMDB fetch per show just to support a filter, that's a real scoping tradeoff, not an oversight, stated here so it isn't a surprise.
+- Added genre filter to Movies and to the Home movie watchlist. Sorting movies by rating isn't implemented, ratings come from OMDb live and aren't cached per movie, sorting by something not actually stored would be fake, so it currently falls back to title order, flagged in the code rather than silently wrong.
+- Add page now shows Popular shows, Popular movies, Upcoming movies, and a "Recently available at home" section when the search box is empty. That last one is TMDB's closest real equivalent to Rotten Tomatoes' page (recent US digital releases via TMDB's own release-type data), it's a genuine approximation using documented TMDB filters, not the same curation RT does, said plainly in the UI too.
+

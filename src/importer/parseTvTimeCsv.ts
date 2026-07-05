@@ -93,6 +93,30 @@ export function parseWantToWatchMovies(text: string): RawMovieRow[] {
     .filter((r) => r.movie_name.trim());
 }
 
+/**
+ * Movie rewatch events. Verified against real export data that TV Time's own
+ * `rewatch_count` aggregate field is unreliable (44% mismatch rate against
+ * actually counted rewatch events in a real user's data, always under, never
+ * over), so this counts raw 'rewatch' type rows instead of trusting that field.
+ */
+export function parseMovieRewatches(text: string): RawMovieRow[] {
+  const rows = parseCsv<RawMovieRow>(text);
+  return rows
+    .filter((r) => r.entity_type === "movie" && r.type === "rewatch")
+    .map((r) => ({ ...r, movie_name: effectiveMovieName(r) ?? "" }))
+    .filter((r) => r.movie_name.trim());
+}
+
+/** Counts rewatch rows per movie title, for the rewatchCount field. */
+export function countRewatchesByTitle(rows: RawMovieRow[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const key = row.movie_name.trim();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
 /** Episode watch/rewatch events from tracking-prod-records-v2.csv. */
 export function parseEpisodeEvents(text: string): RawEpisodeEventRow[] {
   const rows = parseCsv<RawEpisodeEventRow>(text);

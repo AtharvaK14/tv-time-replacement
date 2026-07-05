@@ -61,7 +61,11 @@ export async function searchMovie(query: string): Promise<MovieSearchResult[]> {
   return data.results;
 }
 
-// ---- Details ---------------------------------------------------------------
+// ---- Details ----------------------------------------------------------------
+// Both detail endpoints use append_to_response=external_ids to get imdb_id in
+// the SAME call, confirmed against TMDB's own docs, rather than a second
+// request. This is what makes accurate (ID-based, not title-based) OMDb
+// lookups possible without doubling API calls.
 
 export interface TvShowDetails {
   id: number;
@@ -71,11 +75,14 @@ export interface TvShowDetails {
   first_air_date: string | null;
   overview: string | null;
   number_of_seasons: number;
+  episode_run_time: number[]; // TMDB's array of common episode runtimes in minutes, often just one value, sometimes empty
+  genres: { id: number; name: string }[];
   seasons: { season_number: number; episode_count: number; name: string }[];
+  external_ids?: { imdb_id: string | null };
 }
 
 export async function getTvShowDetails(tmdbId: number): Promise<TvShowDetails> {
-  return tmdbGet<TvShowDetails>(`/tv/${tmdbId}`);
+  return tmdbGet<TvShowDetails>(`/tv/${tmdbId}`, { append_to_response: "external_ids" });
 }
 
 export interface SeasonEpisode {
@@ -84,6 +91,7 @@ export interface SeasonEpisode {
   overview: string | null;
   air_date: string | null;
   vote_average: number;
+  still_path: string | null;
 }
 
 export interface SeasonDetails {
@@ -101,8 +109,80 @@ export interface MovieDetails {
   release_date: string | null;
   poster_path: string | null;
   overview: string | null;
+  runtime: number | null; // minutes
+  genres: { id: number; name: string }[];
+  external_ids?: { imdb_id: string | null };
 }
 
 export async function getMovieDetails(tmdbId: number): Promise<MovieDetails> {
-  return tmdbGet<MovieDetails>(`/movie/${tmdbId}`);
+  return tmdbGet<MovieDetails>(`/movie/${tmdbId}`, { append_to_response: "external_ids" });
+}
+
+// ---- Genres -----------------------------------------------------------------
+
+export interface Genre {
+  id: number;
+  name: string;
+}
+
+export async function getTvGenres(): Promise<Genre[]> {
+  const data = await tmdbGet<{ genres: Genre[] }>("/genre/tv/list");
+  return data.genres;
+}
+
+export async function getMovieGenres(): Promise<Genre[]> {
+  const data = await tmdbGet<{ genres: Genre[] }>("/genre/movie/list");
+  return data.genres;
+}
+
+// ---- Discovery (Add page suggestions) ----------------------------------------
+
+export async function getPopularTvShows(): Promise<TvSearchResult[]> {
+  const data = await tmdbGet<{ results: TvSearchResult[] }>("/tv/popular");
+  return data.results;
+}
+
+export async function getPopularMovies(): Promise<MovieSearchResult[]> {
+  const data = await tmdbGet<{ results: MovieSearchResult[] }>("/movie/popular");
+  return data.results;
+}
+
+export async function getUpcomingMovies(): Promise<MovieSearchResult[]> {
+  const data = await tmdbGet<{ results: MovieSearchResult[] }>("/movie/upcoming");
+  return data.results;
+}
+
+/**
+ * TMDB's closest equivalent to Rotten Tomatoes' "Movies at Home" (recent
+ * digital/home releases). TMDB doesn't have a dedicated "at home" endpoint,
+ * this uses /discover/movie filtered to release type 4 (Digital, confirmed
+ * via TMDB's own release_dates documentation) within the last ~45 days,
+ * sorted newest first. It's a real equivalent built from documented TMDB
+ * filters, not the same curation RT does, worth treating as an approximation.
+ */
+export async function getRecentlyAvailableAtHome(): Promise<MovieSearchResult[]> {
+  const today = new Date();
+  const past = new Date(today.getTime() - 45 * 24 * 60 * 60 * 1000);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  const data = await tmdbGet<{ results: MovieSearchResult[] }>("/discover/movie", {
+    region: "US",
+    with_release_type: "4",
+    "release_date.gte": fmt(past),
+    "release_date.lte": fmt(today),
+    sort_by: "release_date.desc",
+  });
+  return data.results;
+}
+
+export interface DiscoverFilters {
+  genreId?: number;
+  minRating?: number;
+}
+
+export async function discoverMovies(filters: DiscoverFilters): Promise<MovieSearchResult[]> {
+  const params: Record<string, string> = { sort_by: "popularity.desc" };
+  if (filters.genreId) params.with_genres = String(filters.genreId);
+  if (filters.minRating) params["vote_average.gte"] = String(filters.minRating);
+  const data = await tmdbGet<{ results: MovieSearchResult[] }>("/discover/movie", params);
+  return data.results;
 }
