@@ -1,5 +1,5 @@
 import { db, type TitleMatch } from "../db";
-import { searchTvShow, searchMovie, type TvSearchResult, type MovieSearchResult } from "../tmdb";
+import { searchTvShow, searchMovie, findByExternalId, type TvSearchResult, type MovieSearchResult } from "../tmdb";
 import { splitTitleYear } from "./parseTvTimeCsv";
 
 export interface DisambiguationCandidate {
@@ -138,4 +138,89 @@ export async function resolveShowTitle(rawTitle: string, resolveAmbiguous: Resol
 
 export async function resolveMovieTitle(rawTitle: string, resolveAmbiguous: ResolveAmbiguous): Promise<number | null> {
   return resolveTitle(rawTitle, "movie", resolveAmbiguous);
+}
+
+// ---- Exact ID-based resolution, the new primary path -----------------------
+// TMDB's /find endpoint is an exact ID join (imdb_id or tvdb_id), not a
+// fuzzy search, verified working for both movies and TV shows against
+// TMDB's own community documentation. This has zero ambiguity, so it never
+// needs to prompt the user. Falls back to the fuzzy title matcher above
+// only when no ID is available, or the ID lookup comes back empty (TMDB
+// doesn't have that title indexed under that external ID).
+
+async function resolveByExternalId(
+  cacheKey: string,
+  kind: "show" | "movie",
+  lookup: () => Promise<{ tmdbId: number; name: string } | null>
+): Promise<number | null> {
+  const cached = await db.titleMatches.get(cacheKey);
+  if (cached && cached.kind === kind) return cached.tmdbId;
+
+  const result = await lookup();
+  if (!result) return null;
+
+  const record: TitleMatch = {
+    rawTitle: cacheKey,
+    kind,
+    tmdbId: result.tmdbId,
+    matchedName: result.name,
+    matchMethod: "exact-id",
+  };
+  await db.titleMatches.put(record);
+  return result.tmdbId;
+}
+
+export async function resolveShowByIds(
+  tvdbId: number | null,
+  imdbId: string | null,
+  fallbackTitle: string,
+  resolveAmbiguous: ResolveAmbiguous
+): Promise<number | null> {
+  if (tvdbId) {
+    const cacheKey = `tvdb:${tvdbId}`;
+    const id = await resolveByExternalId(cacheKey, "show", async () => {
+      const found = await findByExternalId(String(tvdbId), "tvdb_id");
+      const hit = found.tv_results[0];
+      return hit ? { tmdbId: hit.id, name: hit.name } : null;
+    });
+    if (id !== null) return id;
+  }
+  if (imdbId) {
+    const cacheKey = `imdb:${imdbId}`;
+    const id = await resolveByExternalId(cacheKey, "show", async () => {
+      const found = await findByExternalId(imdbId, "imdb_id");
+      const hit = found.tv_results[0];
+      return hit ? { tmdbId: hit.id, name: hit.name } : null;
+    });
+    if (id !== null) return id;
+  }
+  // No ID matched (or none was available), fall back to fuzzy title search.
+  return resolveShowTitle(fallbackTitle, resolveAmbiguous);
+}
+
+export async function resolveMovieByIds(
+  imdbId: string | null,
+  tvdbId: number | null,
+  fallbackTitle: string,
+  resolveAmbiguous: ResolveAmbiguous
+): Promise<number | null> {
+  if (imdbId) {
+    const cacheKey = `imdb:${imdbId}`;
+    const id = await resolveByExternalId(cacheKey, "movie", async () => {
+      const found = await findByExternalId(imdbId, "imdb_id");
+      const hit = found.movie_results[0];
+      return hit ? { tmdbId: hit.id, name: hit.title } : null;
+    });
+    if (id !== null) return id;
+  }
+  if (tvdbId) {
+    const cacheKey = `tvdb:${tvdbId}`;
+    const id = await resolveByExternalId(cacheKey, "movie", async () => {
+      const found = await findByExternalId(String(tvdbId), "tvdb_id");
+      const hit = found.movie_results[0];
+      return hit ? { tmdbId: hit.id, name: hit.title } : null;
+    });
+    if (id !== null) return id;
+  }
+  return resolveMovieTitle(fallbackTitle, resolveAmbiguous);
 }

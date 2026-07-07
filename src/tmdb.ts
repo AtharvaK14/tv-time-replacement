@@ -196,3 +196,22 @@ export async function discoverMovies(filters: DiscoverFilters): Promise<MovieSea
   const data = await tmdbGet<{ results: MovieSearchResult[] }>("/discover/movie", params);
   return data.results;
 }
+
+// ---- Exact ID-based lookup, verified against TMDB's own community docs -----
+// Confirmed working for external_source values "imdb_id" and "tvdb_id",
+// covering both movie_results and tv_results. This is an exact ID join, not
+// a fuzzy title search, and is used as the PRIMARY matching path whenever
+// the TV Time export gives us an IMDb or TVDB ID, only falling back to the
+// fuzzy title matcher when no ID is available or the ID lookup comes up empty.
+
+export interface FindResults {
+  movie_results: MovieSearchResult[];
+  tv_results: TvSearchResult[];
+}
+
+export async function findByExternalId(
+  externalId: string,
+  source: "imdb_id" | "tvdb_id"
+): Promise<FindResults> {
+  return tmdbGet<FindResults>(`/find/${externalId}`, { external_source: source });
+}

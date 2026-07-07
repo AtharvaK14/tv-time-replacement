@@ -4,6 +4,7 @@ import Dexie, { type Table } from "dexie";
 
 export interface Show {
   tmdbId: number;
+  tvdbId?: number | null; // from the third-party TV Time export, used for exact ID matching
   name: string;
   posterPath: string | null;
   firstAirYear: number | null;
@@ -15,6 +16,14 @@ export interface Show {
   episodeRuntimeMinutes?: number | null; // average from TMDB's episode_run_time, undefined until backfilled for pre-existing rows
   genreIds?: number[]; // TMDB genre IDs, for the genre filter
   imdbId?: string | null; // from TMDB's external_ids, used for accurate OMDb lookups instead of title matching
+  // TV Time's OWN status for this show (not_started_yet / continuing / up_to_date / stopped / watch_later),
+  // straight from the third-party export. This is authoritative and replaces
+  // trying to reconstruct "is this show up to date" ourselves by diffing
+  // watched episodes against TMDB's episode list, which depends on TMDB and
+  // TV Time agreeing on season/episode numbering, something proven NOT
+  // reliable enough to build Watch Next on. Undefined for shows added before
+  // this field existed, or added manually rather than imported.
+  tvTimeStatus?: "not_started_yet" | "continuing" | "up_to_date" | "stopped" | "watch_later";
 }
 
 export interface Episode {
@@ -28,6 +37,7 @@ export interface Episode {
   airDate: string | null;
   tmdbRating: number; // TMDB's own vote_average, 0-10, always free, distinct from IMDb's rating
   stillPath: string | null; // episode thumbnail image
+  runtimeMinutes: number | null; // real per-episode runtime from TVmaze when available; TMDB/TVDB don't reliably track this at all, confirmed directly from their own staff
 }
 
 export interface WatchedEpisode {
@@ -62,7 +72,7 @@ export interface TitleMatch {
   tmdbId: number | null;
   matchedName: string | null;
   // Optional because title matches cached before this field existed won't have it.
-  matchMethod?: "single" | "year-hint" | "exact-title" | "popularity-dominant" | "user-picked" | "skipped";
+  matchMethod?: "single" | "year-hint" | "exact-title" | "popularity-dominant" | "user-picked" | "skipped" | "exact-id";
 }
 
 export interface Setting {
@@ -154,6 +164,34 @@ class TrackerDB extends Dexie {
       titleMatches: "rawTitle, kind",
       settings: "key",
     }).upgrade((tx) => tx.table("episodes").clear());
+    // v6: added tvdbId and tvTimeStatus to Show, for the new import path
+    // that uses a third-party TV Time data export with clean IDs and TV
+    // Time's own authoritative per-show status, instead of reconstructing
+    // status from raw event logs. Purely additive, no clearing needed,
+    // existing shows just get undefined for these fields until re-imported
+    // from the new export format.
+    this.version(6).stores({
+      shows: "tmdbId, name, isFollowed, lastWatchedAt, tvdbId",
+      episodes: "key, showId, [showId+seasonNumber]",
+      watchedEpisodes: "key, showId, watchedAt",
+      movies: "tmdbId, title, watched, wantsToWatch",
+      titleMatches: "rawTitle, kind",
+      settings: "key",
+    });
+    // v7: added runtimeMinutes to Episode (real per-episode runtime from
+    // TVmaze, when available). Same pattern as before: only the episodes
+    // cache is cleared (pure TMDB/TVmaze cache, always safely re-fetchable),
+    // watchedEpisodes and movies are never touched.
+    this.version(7)
+      .stores({
+        shows: "tmdbId, name, isFollowed, lastWatchedAt, tvdbId",
+        episodes: "key, showId, [showId+seasonNumber]",
+        watchedEpisodes: "key, showId, watchedAt",
+        movies: "tmdbId, title, watched, wantsToWatch",
+        titleMatches: "rawTitle, kind",
+        settings: "key",
+      })
+      .upgrade((tx) => tx.table("episodes").clear());
   }
 }
 

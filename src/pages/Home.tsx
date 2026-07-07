@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db, type Episode } from "../db";
+import { db, type Episode, type Show } from "../db";
 import { TMDB_IMAGE_BASE, getMovieGenres, type Genre } from "../tmdb";
-import { ensureEpisodesCached, findNextUnwatched } from "../lib/episodeSync";
+import { ensureEpisodesCached, findNextUnwatched, countAdditionalUnwatched } from "../lib/episodeSync";
 import { daysSince, STALE_DAYS_THRESHOLD } from "../lib/showStatus";
 import DetailsPanel from "../components/DetailsPanel";
 
@@ -10,53 +10,112 @@ interface Row {
   showId: number;
   showName: string;
   posterPath: string | null;
-  nextEpisode: Episode;
+  nextEpisode: Episode | null; // null when TV Time confirms there's more to watch but we couldn't line it up against TMDB's episode list (numbering mismatch)
+  additionalCount: number; // the "+N" badge
   lastWatchedAt: string | null;
+}
+
+/**
+ * A show belongs in "has more to watch" if TV Time's own status says so
+ * (authoritative, from the new import format), or if we don't have that
+ * status yet (older import) and our own TMDB-episode-list comparison finds
+ * an unwatched aired episode.
+ */
+function hasMoreToWatch(show: Show, computedNext: Episode | null, watchedCount: number): boolean {
+  if (show.tvTimeStatus) return show.tvTimeStatus === "continuing";
+  return computedNext !== null && watchedCount > 0;
+}
+
+function EpisodeRow({ row, onOpenShow, onMarkWatched }: { row: Row; onOpenShow: (id: number) => void; onMarkWatched: (row: Row) => void }) {
+  const isPremiere = row.nextEpisode?.episodeNumber === 1;
+  return (
+    <div className="watch-next-row">
+      {row.posterPath ? (
+        <img src={`${TMDB_IMAGE_BASE}${row.posterPath}`} alt={row.showName} onClick={() => onOpenShow(row.showId)} />
+      ) : (
+        <div className="poster-placeholder wn-poster" onClick={() => onOpenShow(row.showId)} />
+      )}
+      <div className="wn-body">
+        <span className="show-pill" onClick={() => onOpenShow(row.showId)}>
+          {row.showName} &rsaquo;
+        </span>
+        {row.nextEpisode ? (
+          <>
+            <p className="wn-episode-line">
+              S{String(row.nextEpisode.seasonNumber).padStart(2, "0")} | E
+              {String(row.nextEpisode.episodeNumber).padStart(2, "0")}
+              {row.additionalCount > 0 && <span className="muted"> +{row.additionalCount}</span>}
+            </p>
+            <p className="muted small">{row.nextEpisode.name}</p>
+            {isPremiere && <span className="premiere-tag">PREMIERE</span>}
+          </>
+        ) : (
+          <p className="muted small">More to watch (couldn't match the exact next episode against TMDB)</p>
+        )}
+      </div>
+      <button
+        className="watch-toggle-circle"
+        onClick={() => onMarkWatched(row)}
+        aria-label="Mark watched"
+        disabled={!row.nextEpisode}
+      >
+        &#10003;
+      </button>
+    </div>
+  );
 }
 
 function ShowsHome({ onOpenShow }: { onOpenShow: (tmdbId: number) => void }) {
   const shows = useLiveQuery(() => db.shows.filter((s) => s.isFollowed && !s.isArchived).toArray(), []);
   const [syncing, setSyncing] = useState(false);
-  const [rows, setRows] = useState<Row[] | null>(null);
+  const [tab, setTab] = useState<"next" | "stale">("next");
 
+  // Step 1: make sure TMDB episode lists are cached for every followed show.
   useEffect(() => {
     if (!shows) return;
     let cancelled = false;
-
-    async function build() {
+    async function sync() {
       setSyncing(true);
-      const result: Row[] = [];
       for (const show of shows!) {
-        await ensureEpisodesCached(show.tmdbId);
         if (cancelled) return;
-
-        const episodes = await db.episodes.where("showId").equals(show.tmdbId).toArray();
-        const watched = await db.watchedEpisodes.where("showId").equals(show.tmdbId).toArray();
-        const watchedKeys = new Set(watched.map((w) => w.key));
-        const next = findNextUnwatched(episodes, watchedKeys);
-
-        if (next && watched.length > 0) {
-          result.push({
-            showId: show.tmdbId,
-            showName: show.name,
-            posterPath: show.posterPath,
-            nextEpisode: next,
-            lastWatchedAt: show.lastWatchedAt,
-          });
-        }
+        await ensureEpisodesCached(show.tmdbId);
       }
-      if (!cancelled) {
-        setRows(result);
-        setSyncing(false);
-      }
+      if (!cancelled) setSyncing(false);
     }
-    build();
+    sync();
     return () => {
       cancelled = true;
     };
   }, [shows]);
 
+  // Step 2: a real Dexie live query, recomputes automatically on ANY change
+  // to shows, episodes, or watchedEpisodes, not just when the shows list
+  // itself changes.
+  const rows = useLiveQuery(async (): Promise<Row[]> => {
+    if (!shows) return [];
+    const result: Row[] = [];
+    for (const show of shows) {
+      const episodes = await db.episodes.where("showId").equals(show.tmdbId).toArray();
+      const watched = await db.watchedEpisodes.where("showId").equals(show.tmdbId).toArray();
+      const watchedKeys = new Set(watched.map((w) => w.key));
+      const next = findNextUnwatched(episodes, watchedKeys);
+
+      if (hasMoreToWatch(show, next, watched.length)) {
+        result.push({
+          showId: show.tmdbId,
+          showName: show.name,
+          posterPath: show.posterPath,
+          nextEpisode: next,
+          additionalCount: countAdditionalUnwatched(episodes, watchedKeys),
+          lastWatchedAt: show.lastWatchedAt,
+        });
+      }
+    }
+    return result;
+  }, [shows]);
+
   async function markWatched(row: Row) {
+    if (!row.nextEpisode) return;
     await db.watchedEpisodes.put({
       key: row.nextEpisode.key,
       showId: row.showId,
@@ -68,80 +127,38 @@ function ShowsHome({ onOpenShow }: { onOpenShow: (tmdbId: number) => void }) {
     await db.shows.update(row.showId, { lastWatchedAt: new Date().toISOString() });
   }
 
-  if (!shows) return <p className="muted">Loading...</p>;
+  if (!shows || !rows) return <p className="muted">Loading...</p>;
 
-  const watchNext = (rows ?? []).filter((r) => (daysSince(r.lastWatchedAt) ?? 0) < STALE_DAYS_THRESHOLD);
-  const stale = (rows ?? []).filter((r) => (daysSince(r.lastWatchedAt) ?? 0) >= STALE_DAYS_THRESHOLD);
+  const watchNext = rows.filter((r) => (daysSince(r.lastWatchedAt) ?? 0) < STALE_DAYS_THRESHOLD);
+  const stale = rows.filter((r) => (daysSince(r.lastWatchedAt) ?? 0) >= STALE_DAYS_THRESHOLD);
+  const activeList = tab === "next" ? watchNext : stale;
 
   return (
     <>
-      <h2>Watch Next</h2>
+      <div className="pill-tabs">
+        <button className={`pill-tab ${tab === "next" ? "active" : ""}`} onClick={() => setTab("next")}>
+          Watch Next
+        </button>
+        <button className={`pill-tab ${tab === "stale" ? "active" : ""}`} onClick={() => setTab("stale")}>
+          Haven't Watched For a While
+        </button>
+      </div>
+
       {syncing && <p className="muted small">Syncing episode data from TMDB...</p>}
 
-      {watchNext.length === 0 && !syncing && (
+      {activeList.length === 0 && !syncing && (
         <p className="muted">
-          Nothing queued up. If you're sure some shows should be here, check the Diagnostics tab, or try re-running
-          the import (a past bug in episode detail clicks could have accidentally unmarked episodes, re-importing
-          restores watch history straight from your CSV regardless of current state).
+          {tab === "next"
+            ? "Nothing queued up. If you're sure some shows should be here, check Diagnostics in Settings, or re-import using the newer TV Time export format."
+            : "Nothing here, everything with more to watch has been touched recently."}
         </p>
       )}
 
       <div className="watch-next-list">
-        {watchNext.map((row) => (
-          <div key={row.showId} className="watch-next-row">
-            {row.posterPath ? (
-              <img
-                src={`${TMDB_IMAGE_BASE}${row.posterPath}`}
-                alt={row.showName}
-                onClick={() => onOpenShow(row.showId)}
-              />
-            ) : (
-              <div className="poster-placeholder wn-poster" onClick={() => onOpenShow(row.showId)} />
-            )}
-            <div className="wn-body">
-              <p className="show-name" onClick={() => onOpenShow(row.showId)}>
-                {row.showName}
-              </p>
-              <p className="muted small">
-                S{row.nextEpisode.seasonNumber}E{row.nextEpisode.episodeNumber} &middot; {row.nextEpisode.name}
-              </p>
-            </div>
-            <button onClick={() => markWatched(row)}>Mark watched</button>
-          </div>
+        {activeList.map((row) => (
+          <EpisodeRow key={row.showId} row={row} onOpenShow={onOpenShow} onMarkWatched={markWatched} />
         ))}
       </div>
-
-      {stale.length > 0 && (
-        <>
-          <h2 style={{ marginTop: 24 }}>Haven't Watched For a While</h2>
-          <p className="muted small">No activity in {STALE_DAYS_THRESHOLD}+ days, but there's more to watch.</p>
-          <div className="watch-next-list">
-            {stale.map((row) => (
-              <div key={row.showId} className="watch-next-row">
-                {row.posterPath ? (
-                  <img
-                    src={`${TMDB_IMAGE_BASE}${row.posterPath}`}
-                    alt={row.showName}
-                    onClick={() => onOpenShow(row.showId)}
-                  />
-                ) : (
-                  <div className="poster-placeholder wn-poster" onClick={() => onOpenShow(row.showId)} />
-                )}
-                <div className="wn-body">
-                  <p className="show-name" onClick={() => onOpenShow(row.showId)}>
-                    {row.showName}
-                  </p>
-                  <p className="muted small">
-                    S{row.nextEpisode.seasonNumber}E{row.nextEpisode.episodeNumber} &middot; {row.nextEpisode.name}
-                  </p>
-                  <p className="muted small">Last watched {daysSince(row.lastWatchedAt)} days ago</p>
-                </div>
-                <button onClick={() => markWatched(row)}>Mark watched</button>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
     </>
   );
 }

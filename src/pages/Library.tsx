@@ -105,14 +105,21 @@ export default function Library() {
           <div className="stat-label">TV time</div>
         </div>
         <div className="stat-card">
-          <div className="stat-value">{stats.loading ? "..." : stats.episodeWatchEvents.toLocaleString()}</div>
-          <div className="stat-label">Episodes watched{stats.loading ? "" : stats.episodeWatchEvents !== stats.distinctEpisodesWatched ? " (incl. rewatches)" : ""}</div>
+          <div className="stat-value">{stats.loading ? "..." : stats.distinctEpisodesWatched.toLocaleString()}</div>
+          <div className="stat-label">Episodes watched</div>
         </div>
       </div>
       {stats.backfilling && stats.backfillProgress && (
         <p className="muted small">
           Fetching runtime data for shows added before this feature existed: {stats.backfillProgress.done} /{" "}
           {stats.backfillProgress.total}
+        </p>
+      )}
+      {!stats.loading && stats.distinctEpisodesWatched > 0 && (
+        <p className="muted small">
+          {stats.exactRuntimeCount.toLocaleString()} of {stats.distinctEpisodesWatched.toLocaleString()} watched
+          episodes use TVmaze's real per-episode runtime, the rest fall back to each show's average (open a show's
+          seasons to fetch its exact episode runtimes).
         </p>
       )}
 

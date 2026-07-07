@@ -294,3 +294,37 @@ hr { border: none; border-top: 1px solid var(--border); }
   40% { transform: scale(1.04); }
   100% { transform: scale(1); }
 }
+
+.danger-button {
+  background: rgba(224, 102, 92, 0.12);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+}
+.danger-button:hover { background: rgba(224, 102, 92, 0.2); }
+
+/* Home pill-tabs (Watch Next / Haven't Watched, mutually exclusive) */
+.pill-tabs { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.pill-tab {
+  border-radius: 999px; padding: 7px 16px; font-size: 0.85rem; font-weight: 600;
+  background: var(--surface); border: 1px solid var(--border); color: var(--muted);
+}
+.pill-tab.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+
+.show-pill {
+  display: inline-block; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.02em;
+  text-transform: uppercase; color: var(--text); cursor: pointer; margin-bottom: 4px;
+  background: var(--surface-raised); border: 1px solid var(--border); border-radius: 999px;
+  padding: 2px 10px;
+}
+.wn-episode-line { font-weight: 700; font-size: 1rem; margin: 4px 0 2px; font-family: var(--font-mono); }
+.premiere-tag {
+  display: inline-block; margin-top: 4px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.03em;
+  background: var(--accent-dim); color: var(--accent); border-radius: 4px; padding: 2px 8px;
+}
+
+.watch-toggle-circle {
+  width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; padding: 0;
+  background: var(--text); color: var(--bg); border: none; font-size: 1rem;
+  display: flex; align-items: center; justify-content: center;
+}
+.watch-toggle-circle:disabled { background: var(--surface-raised); color: var(--muted); opacity: 0.5; }

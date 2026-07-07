@@ -1,7 +1,27 @@
 import { db, episodeKey, type Episode } from "../db";
 import { getTvShowDetails, getSeasonDetails } from "../tmdb";
+import { getTvmazeRuntimesByTvdbId } from "../tvmaze";
 
-function toEpisodeRecords(
+// In-memory cache of TVmaze runtime lookups, keyed by tmdbId, for this
+// browser session only (not persisted, cheap to re-derive, and TVmaze data
+// doesn't change often enough to justify Dexie persistence complexity).
+// Avoids re-fetching TVmaze once per season for the same show.
+const tvmazeRuntimeCache = new Map<number, Promise<Map<string, number>>>();
+
+async function getTvmazeRuntimesForShow(tmdbId: number): Promise<Map<string, number>> {
+  const cached = tvmazeRuntimeCache.get(tmdbId);
+  if (cached) return cached;
+
+  const promise = (async () => {
+    const show = await db.shows.get(tmdbId);
+    if (!show?.tvdbId) return new Map<string, number>();
+    return getTvmazeRuntimesByTvdbId(show.tvdbId);
+  })();
+  tvmazeRuntimeCache.set(tmdbId, promise);
+  return promise;
+}
+
+async function toEpisodeRecords(
   tmdbId: number,
   seasonNumber: number,
   episodes: {
@@ -12,7 +32,8 @@ function toEpisodeRecords(
     vote_average: number;
     still_path: string | null;
   }[]
-): Episode[] {
+): Promise<Episode[]> {
+  const tvmazeRuntimes = await getTvmazeRuntimesForShow(tmdbId);
   return episodes.map((ep) => ({
     key: episodeKey(tmdbId, seasonNumber, ep.episode_number),
     showId: tmdbId,
@@ -23,6 +44,7 @@ function toEpisodeRecords(
     airDate: ep.air_date,
     tmdbRating: ep.vote_average,
     stillPath: ep.still_path,
+    runtimeMinutes: tvmazeRuntimes.get(`${seasonNumber}-${ep.episode_number}`) ?? null,
   }));
 }
 
@@ -42,7 +64,8 @@ export async function ensureEpisodesCached(tmdbId: number): Promise<number[]> {
 
   for (const seasonNumber of missing) {
     const season = await getSeasonDetails(tmdbId, seasonNumber);
-    await db.episodes.bulkPut(toEpisodeRecords(tmdbId, seasonNumber, season.episodes));
+    const records = await toEpisodeRecords(tmdbId, seasonNumber, season.episodes);
+    await db.episodes.bulkPut(records);
   }
 
   return seasonNumbers;
@@ -63,7 +86,8 @@ export async function ensureSeasonCached(tmdbId: number, seasonNumber: number): 
   const existing = await db.episodes.where("[showId+seasonNumber]").equals([tmdbId, seasonNumber]).count();
   if (existing > 0) return;
   const season = await getSeasonDetails(tmdbId, seasonNumber);
-  await db.episodes.bulkPut(toEpisodeRecords(tmdbId, seasonNumber, season.episodes));
+  const records = await toEpisodeRecords(tmdbId, seasonNumber, season.episodes);
+  await db.episodes.bulkPut(records);
 }
 
 /** The next aired, unwatched episode for a show, in season/episode order. Null if none (up to date, or nothing cached yet). */
@@ -75,4 +99,18 @@ export function findNextUnwatched(episodes: Episode[], watchedKeys: Set<string>)
     if (aired && !watchedKeys.has(ep.key)) return ep;
   }
   return null;
+}
+
+/**
+ * How many aired-but-unwatched episodes exist beyond the immediate next
+ * one, for the "+N" badge TV Time shows (e.g. "S01|E04 +4"). Returns 0 if
+ * the next episode is the only one waiting.
+ */
+export function countAdditionalUnwatched(episodes: Episode[], watchedKeys: Set<string>): number {
+  const today = new Date().toISOString().slice(0, 10);
+  const unwatchedAired = episodes.filter((ep) => {
+    const aired = ep.airDate ? ep.airDate <= today : false;
+    return aired && !watchedKeys.has(ep.key);
+  });
+  return Math.max(0, unwatchedAired.length - 1);
 }

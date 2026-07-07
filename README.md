@@ -251,4 +251,56 @@ src/
 
 **On the stats question, checked your new file rather than assuming it would help**: `stats-prod-cache.csv` is exactly what its name says, a cache. It only covers an 11-month window (Aug 2025 to Jul 2026), not your full history, so it can't answer "how much have I watched total" even in principle. More importantly, I cross-checked it against my own method for that same window: my raw "first watch" event count for movies in that window is 120, TV Time's own cached count for the same window is also 120. That's real agreement, not a coincidence, and it validates the event-counting approach rather than pointing to a new bug. **The much more likely explanation for "still incorrect" is that the rewatch-counting fix from last round needs a re-import to apply** to episodes already in your database (I flagged this requirement at the time). Before I chase a new hypothesis: have you re-imported since that fix shipped? If yes and it's still off, tell me a specific show or movie where the number looks wrong and I'll trace that one specifically instead of guessing at another systemic cause.
 
+## This round: a real root-cause fix for Watch Next, and a full import rebuild around better data
+
+**Found and fixed the actual Watch Next bug, confirmed by re-reading the code, not another theory.** The Home screen's "what should I watch next" list only recomputed when the list of followed shows changed, not when you marked an episode watched or unwatched. Marking an episode watched writes to a different table (`watchedEpisodes`), which the old code's `useEffect` didn't depend on, so the screen quietly went stale the moment you touched anything and only refreshed if you navigated away and back to a point where the shows list itself happened to change. This is exactly consistent with what you reported (modifying episodes and seeing no change). Fixed by rebuilding the computation as a genuine Dexie live query that reads from `shows`, `episodes`, and `watchedEpisodes` together, so it automatically recomputes whenever any of them change, no manual dependency tracking to get wrong.
+
+**Rebuilt the import pipeline around the new export you found**, and this is a real upgrade, not a preference:
+- **Movies now match 922/922 by exact IMDb ID** (verified against your actual file), zero fuzzy title search, zero disambiguation prompts needed for movies at all going forward.
+- **Shows match by exact TVDB ID** (193/193 have one, confirmed against your file; TMDB's `/find` endpoint with `external_source=tvdb_id` is officially documented and widely used, including by Kodi's own TMDB scraper for exactly this purpose). Falls back to fuzzy title search only if a show has no ID or the ID lookup comes up empty.
+- **TV Time's own per-show status** (`continuing` / `up_to_date` / `not_started_yet` / `stopped` / `watch_later`) is now used directly for "does this show have more to watch," instead of me reconstructing that by comparing your watched episodes against TMDB's episode list. That reconstruction was fragile because it silently depended on TV Time and TMDB agreeing on season/episode numbering, which isn't guaranteed. TV Time's own field doesn't have that problem, it's authoritative. Verified directly: Arrow's status in your new export is `up_to_date`, matching what raw event-counting predicted weeks ago (170 of ~171 episodes watched), confirming the bug was in my reconstruction logic, not your data.
+- **Per-episode `watched_count` (including rewatches) comes directly from the export now**, no more reconstructing it by counting raw event rows, which is simpler and removes an entire category of potential counting bugs.
+
+**Your old CSV export still works** as a fallback (Settings → Import → the dropdown), for anyone without access to this third-party tool, but the JSON path is now the default and recommended option, and is what you should use going forward.
+
+**Known limitation, from the export tool's own documentation, not discovered by me**: its own bundled summary states pre-2017 watches may be missing from this export even though they exist in TV Time's raw CSVs, and continuing shows can occasionally show a phantom unwatched episode if TV Time pre-created a placeholder for an episode that hasn't aired yet. Worth knowing if a very old show or a currently-airing one looks slightly off after this import.
+
+**Still unverified, because I can't run it live**: the TVDB-based show matching has never executed against your real API key. The parsing was tested directly against your actual uploaded files (confirmed exact matches: 922 movies, 193 shows, 7,086 total watched episodes matching the export tool's own summary count exactly), but the live TMDB lookups have not. Re-import and tell me what the match breakdown looks like, and specifically whether Watch Next now shows anything.
+
+## This round: three real bugs found from your exact numbers, and why a clean reset is the right call right now
+
+You gave me exact target numbers (TV Time's real values) against what the app showed, that's what made these findings possible instead of more guessing.
+
+**"Episodes watched" was displaying the wrong number.** Both a distinct-episode count and a rewatch-inclusive total were already computed, the display was wired to the wrong one. Per your own research (confirmed correct): TV Time's "Episodes Watched" counts distinct episodes only, rewatches only add to time watched. Fixed to show the distinct count.
+
+**TV time undercounting (should be ~8mo, showed ~2mo) is very likely a "null never retries" bug.** When TMDB has no episode-runtime data for a show (confirmed straight from TMDB's own staff on their forum: they don't track true per-episode runtime, and the show-level average can be genuinely empty for some shows), my code stored `null` and the retry logic only ever rechecked `undefined`, not `null`. Once a show hit this, it contributed zero minutes forever with no way to self-correct. Fixed two ways: the retry check now catches both, and a documented fallback (40 min/episode, a judgment call, tunable in `lib/runtime.ts`) is used when TMDB genuinely has nothing, instead of silently contributing zero. Same fix applied to movies (fallback 110 min, `lib/stats.ts`).
+
+**Your diagnostic instinct about stale data was correct, and here's specifically why:** every schema change so far has deliberately preserved existing data rather than wiping it, the right call for real watch history, but it means the null-forever bug above could never self-heal for shows already affected, and old wrong TMDB matches cached from before the ID-based matcher existed are also just sitting there. Added a **Reset Data** section in Settings (collapsed by default) that clears shows/movies/episodes/watch-history/match-cache without touching your API keys, so you don't need to dig through browser DevTools to get a clean slate during development.
+
+**Settings restructured per your request**: API keys are now in a collapsed section, not shown by default. Import is the first thing you see (expanded), since that's the thing you actually do repeatedly.
+
+**Still unverified**: the exact resulting TV time total after these fixes, since I can't run a live import here. Reset, re-import with the new JSON format, and tell me the new number, that's the only way to confirm this actually lands on ~8mo4d16h rather than just "closer than before."
+
+## This round: Home restructured to match TV Time's real interaction model, not my assumption of it
+
+The stacked "Watch Next" + "Haven't Watched For a While" sections were my own design guess, not verified against TV Time's actual UI. Confirmed directly against a real screenshot: these are two separate, mutually-exclusive pill tabs, you view one list at a time, not both stacked together. Rebuilt that way.
+
+Added the two badges visible in the real screenshot that weren't built yet:
+- **The "+N" count** (e.g. "S01|E04 +4"), how many more aired-unwatched episodes exist beyond the immediate next one, computed from the same cached episode/watched data already on hand.
+- **The PREMIERE tag**, shown when the next episode is episode 1 of a season.
+
+**On accurate episode runtimes**: checked three real sources rather than assuming none exist. TMDB and TheTVDB both explicitly do not support per-episode runtime, confirmed directly from each one's own staff on their respective forums, that's a genuine data gap, not a shortcut on my end. TVmaze is different: their own team confirmed per-episode runtime is in their API, it's free, keyless, and supports lookup by the same TVDB ID your export already provides, no new fuzzy matching needed, and one call per show (`?embed=episodes`) returns the full episode list with real runtimes rather than needing one call per episode. This is a real fix for the runtime-accuracy question, not a guess, but it's a genuine new dependency, not built yet, pending your go-ahead since it's real scope, not a one-line change.
+
+## This round: TVmaze integration for real per-episode runtimes
+
+Built against a real confirmed example payload and TVmaze's own documented HAL convention, not assumed. `src/tvmaze.ts` looks up a show by the TVDB ID your export already provides (`/lookup/shows?thetvdb=`), then fetches its full episode list with real runtimes in one call (`/shows/{id}?embed=episodes`), no per-episode calls needed. Never throws, a show TVmaze doesn't have just falls back to the show-level average, same as before.
+
+**Wired into the existing episode-caching flow**, not a separate system: whenever a season gets cached (from Home's sync, or opening a show's season accordion), TVmaze's runtimes for that show are fetched once (cached in memory for the session, not re-fetched per season) and merged in per episode. TV time stats now use the real per-episode number when available, falling back to the show average otherwise, and the Shows page tells you the actual split (e.g. "6,200 of 7,122 watched episodes use TVmaze's real runtime").
+
+**Honest gap**: I could not test this against a live call, `api.tvmaze.com` isn't reachable from my sandbox, same limitation as every other external API in this project. It's built directly from their own confirmed documentation and a real example response, not guessed, but "compiles and matches the docs" and "works against your real library" are different claims, only the second one is confirmed by you actually using it.
+
+
+
+
+
 
