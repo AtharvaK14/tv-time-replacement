@@ -24,23 +24,39 @@ function fromTvTimeStatus(status: NonNullable<Show["tvTimeStatus"]>): ShowWatchS
  * worth it for their view (Home always syncs; a big Library grid might not
  * want to force a TMDB fetch per show just to compute a filter).
  *
- * Prefers TV Time's own tvTimeStatus field when the show was imported via
- * the newer export format, that's authoritative and doesn't depend on
- * TV Time and TMDB agreeing on season/episode numbering. Falls back to
- * comparing watched episodes against TMDB's own episode list only for
- * shows imported the older way.
+ * Combines TV Time's own tvTimeStatus (a snapshot from whenever you last
+ * imported) with a live comparison against watched episodes, rather than
+ * trusting the imported field exclusively. tvTimeStatus goes stale the
+ * moment you mark anything watched or unwatched directly in this app, so
+ * always checking live data too means a show doesn't get permanently stuck
+ * on whatever status it happened to have at import time.
  */
 export async function computeWatchStatus(tmdbId: number): Promise<ShowWatchStatus> {
   const show = await db.shows.get(tmdbId);
-  if (show?.tvTimeStatus) return fromTvTimeStatus(show.tvTimeStatus);
-
   const episodes = await db.episodes.where("showId").equals(tmdbId).toArray();
-  if (episodes.length === 0) return "unknown";
   const watched = await db.watchedEpisodes.where("showId").equals(tmdbId).toArray();
-  if (watched.length === 0) return "not-started";
-  const watchedKeys = new Set(watched.map((w) => w.key));
-  const next = findNextUnwatched(episodes, watchedKeys);
-  return next ? "currently-watching" : "up-to-date";
+
+  let liveStatus: ShowWatchStatus = "unknown";
+  if (episodes.length > 0) {
+    if (watched.length === 0) {
+      liveStatus = "not-started";
+    } else {
+      const watchedKeys = new Set(watched.map((w) => w.key));
+      const next = findNextUnwatched(episodes, watchedKeys);
+      liveStatus = next ? "currently-watching" : "up-to-date";
+    }
+  }
+
+  if (!show?.tvTimeStatus) return liveStatus;
+
+  const imported = fromTvTimeStatus(show.tvTimeStatus);
+  // If either signal says "currently watching," trust that, it means
+  // there's real evidence of something to watch even if the other signal
+  // (usually the stale imported one) disagrees.
+  if (imported === "currently-watching" || liveStatus === "currently-watching") return "currently-watching";
+  // Otherwise prefer the live signal when we actually have episode data to
+  // base it on, falling back to the import snapshot only when we don't.
+  return liveStatus !== "unknown" ? liveStatus : imported;
 }
 
 /** Same as computeWatchStatus, but forces an episode-list sync first so the TMDB-comparison fallback is reliable. */

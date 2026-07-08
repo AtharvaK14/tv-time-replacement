@@ -299,6 +299,17 @@ Built against a real confirmed example payload and TVmaze's own documented HAL c
 
 **Honest gap**: I could not test this against a live call, `api.tvmaze.com` isn't reachable from my sandbox, same limitation as every other external API in this project. It's built directly from their own confirmed documentation and a real example response, not guessed, but "compiles and matches the docs" and "works against your real library" are different claims, only the second one is confirmed by you actually using it.
 
+## This round: the actual Watch Next bug (probably), found by re-reading the code again, plus a real CSS fix
+
+**Found a genuine logic bug via direct code inspection**: once a show had `tvTimeStatus` from import, my code trusted it *exclusively* and never checked live data again. TV Time's own status is a snapshot from whenever you last imported, it goes stale the instant you mark anything watched or unwatched directly in the app afterward. So a show imported as `not_started_yet` or `up_to_date` could never appear in Watch Next again, no matter what you did in the app, since the stale imported field always won. This matches your exact report: marking an episode watched didn't surface the next one. Fixed by treating tvTimeStatus and live watched-data as two signals that get OR'd together, not one exclusively overriding the other. Applied the identical fix to the "Currently Watching" filter on the Shows page, which had the same bug.
+
+**Also rebuilt the underlying reactivity with a more defensively correct pattern**, independent of the bug above: the previous version ran an async loop with sequential Dexie queries inside a single `useLiveQuery`, which I could not be fully confident behaves identically to a simple query for change-tracking purposes. Replaced with three separate, single-table live queries (about as simple as Dexie queries get) combined via a plain synchronous `useMemo`, removing that uncertainty entirely rather than reasoning about it further.
+
+**I want to be straight about the track record here**: this is the third attempt at Watch Next specifically. The first two were real, defensible fixes for real bugs I found, and this one is too, but I can't promise it's the last one without you testing it. If it's still wrong after this, the useful next step is opening Diagnostics on the specific show you're testing with and sending me that output directly, rather than another description of the symptom, since that gives me something concrete to check instead of re-reading the same code a fourth time hoping to spot something new.
+
+**The "Mark Watched" button layout was a one-line CSS fix, confirmed by inspection**: `.show-card-body` had no `flex: 1`, so when the grid stretched a shorter card to match a taller row-mate, the leftover space sat between the title and button instead of the body growing to fill it. Fixed.
+
+
 
 
 

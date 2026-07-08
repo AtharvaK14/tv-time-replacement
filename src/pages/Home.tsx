@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type Episode, type Show } from "../db";
 import { TMDB_IMAGE_BASE, getMovieGenres, type Genre } from "../tmdb";
@@ -17,13 +17,18 @@ interface Row {
 
 /**
  * A show belongs in "has more to watch" if TV Time's own status says so
- * (authoritative, from the new import format), or if we don't have that
- * status yet (older import) and our own TMDB-episode-list comparison finds
- * an unwatched aired episode.
+ * (authoritative at import time), OR if live data in this app says so.
+ * Deliberately an OR, not "trust tvTimeStatus exclusively": tvTimeStatus is
+ * a snapshot from whenever you last imported, it goes stale the moment you
+ * mark anything watched or unwatched directly in this app afterward. Only
+ * trusting the imported field meant a show imported as "not_started_yet" or
+ * "up_to_date" could never appear here again no matter what you did in the
+ * app, which was the actual bug behind episodes you'd just marked watched
+ * not showing their follow-up here.
  */
 function hasMoreToWatch(show: Show, computedNext: Episode | null, watchedCount: number): boolean {
-  if (show.tvTimeStatus) return show.tvTimeStatus === "continuing";
-  return computedNext !== null && watchedCount > 0;
+  const liveSignal = computedNext !== null && watchedCount > 0;
+  return show.tvTimeStatus === "continuing" || liveSignal;
 }
 
 function EpisodeRow({ row, onOpenShow, onMarkWatched }: { row: Row; onOpenShow: (id: number) => void; onMarkWatched: (row: Row) => void }) {
@@ -67,10 +72,21 @@ function EpisodeRow({ row, onOpenShow, onMarkWatched }: { row: Row; onOpenShow: 
 
 function ShowsHome({ onOpenShow }: { onOpenShow: (tmdbId: number) => void }) {
   const shows = useLiveQuery(() => db.shows.filter((s) => s.isFollowed && !s.isArchived).toArray(), []);
+  // Deliberately simple, single-table, whole-table live queries. Each one is
+  // independently and unambiguously reactive to writes on its own table.
+  // Combining them in a plain synchronous useMemo below (no async, no
+  // Dexie calls inside the memo) removes any uncertainty about how a
+  // multi-step async query loop interacts with Dexie's change tracking,
+  // which is the more failure-prone pattern the previous version used.
+  const allEpisodes = useLiveQuery(() => db.episodes.toArray(), []);
+  const allWatched = useLiveQuery(() => db.watchedEpisodes.toArray(), []);
   const [syncing, setSyncing] = useState(false);
   const [tab, setTab] = useState<"next" | "stale">("next");
 
-  // Step 1: make sure TMDB episode lists are cached for every followed show.
+  // Network side effect: make sure TMDB episode lists are cached for every
+  // followed show. Writes to db.episodes, which allEpisodes above reacts to,
+  // so newly-synced seasons flow into the computation below automatically
+  // as they arrive, not just once at the end.
   useEffect(() => {
     if (!shows) return;
     let cancelled = false;
@@ -88,19 +104,32 @@ function ShowsHome({ onOpenShow }: { onOpenShow: (tmdbId: number) => void }) {
     };
   }, [shows]);
 
-  // Step 2: a real Dexie live query, recomputes automatically on ANY change
-  // to shows, episodes, or watchedEpisodes, not just when the shows list
-  // itself changes.
-  const rows = useLiveQuery(async (): Promise<Row[]> => {
-    if (!shows) return [];
+  const rows = useMemo<Row[]>(() => {
+    if (!shows || !allEpisodes || !allWatched) return [];
+
+    const episodesByShow = new Map<number, Episode[]>();
+    for (const ep of allEpisodes) {
+      const list = episodesByShow.get(ep.showId);
+      if (list) list.push(ep);
+      else episodesByShow.set(ep.showId, [ep]);
+    }
+    const watchedByShow = new Map<number, Set<string>>();
+    const watchedCountByShow = new Map<number, number>();
+    for (const w of allWatched) {
+      const set = watchedByShow.get(w.showId);
+      if (set) set.add(w.key);
+      else watchedByShow.set(w.showId, new Set([w.key]));
+      watchedCountByShow.set(w.showId, (watchedCountByShow.get(w.showId) ?? 0) + 1);
+    }
+
     const result: Row[] = [];
     for (const show of shows) {
-      const episodes = await db.episodes.where("showId").equals(show.tmdbId).toArray();
-      const watched = await db.watchedEpisodes.where("showId").equals(show.tmdbId).toArray();
-      const watchedKeys = new Set(watched.map((w) => w.key));
+      const episodes = episodesByShow.get(show.tmdbId) ?? [];
+      const watchedKeys = watchedByShow.get(show.tmdbId) ?? new Set<string>();
+      const watchedCount = watchedCountByShow.get(show.tmdbId) ?? 0;
       const next = findNextUnwatched(episodes, watchedKeys);
 
-      if (hasMoreToWatch(show, next, watched.length)) {
+      if (hasMoreToWatch(show, next, watchedCount)) {
         result.push({
           showId: show.tmdbId,
           showName: show.name,
@@ -112,7 +141,7 @@ function ShowsHome({ onOpenShow }: { onOpenShow: (tmdbId: number) => void }) {
       }
     }
     return result;
-  }, [shows]);
+  }, [shows, allEpisodes, allWatched]);
 
   async function markWatched(row: Row) {
     if (!row.nextEpisode) return;
@@ -127,7 +156,7 @@ function ShowsHome({ onOpenShow }: { onOpenShow: (tmdbId: number) => void }) {
     await db.shows.update(row.showId, { lastWatchedAt: new Date().toISOString() });
   }
 
-  if (!shows || !rows) return <p className="muted">Loading...</p>;
+  if (!shows || !allEpisodes || !allWatched) return <p className="muted">Loading...</p>;
 
   const watchNext = rows.filter((r) => (daysSince(r.lastWatchedAt) ?? 0) < STALE_DAYS_THRESHOLD);
   const stale = rows.filter((r) => (daysSince(r.lastWatchedAt) ?? 0) >= STALE_DAYS_THRESHOLD);

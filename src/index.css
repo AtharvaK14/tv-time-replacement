@@ -125,7 +125,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .show-card img { width: 100%; aspect-ratio: 2/3; object-fit: cover; display: block; }
 .poster-placeholder { width: 100%; aspect-ratio: 2/3; background: var(--surface-raised); }
-.show-card-body { padding: 10px; display: flex; flex-direction: column; gap: 4px; }
+.show-card-body { padding: 10px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
 .show-name { margin: 0; font-size: 0.9rem; font-weight: 600; line-height: 1.3; }
 .movie-card { cursor: default; }
 
