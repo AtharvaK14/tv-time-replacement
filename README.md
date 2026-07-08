@@ -309,6 +309,26 @@ Built against a real confirmed example payload and TVmaze's own documented HAL c
 
 **The "Mark Watched" button layout was a one-line CSS fix, confirmed by inspection**: `.show-card-body` had no `flex: 1`, so when the grid stretched a shorter card to match a taller row-mate, the leftover space sat between the title and button instead of the body growing to fill it. Fixed.
 
+## This round: found via your actual Diagnostics output, not another guess
+
+Your Spider-Noir diagnostic was genuinely useful: it proved the data layer is completely correct, 6 watched, 8 cached, 0 orphaned, S1E7/S1E8 correctly identified as unwatched. So the bug wasn't in the data at all, it was in a condition Diagnostics doesn't check but Watch Next does: an episode also has to have an "aired" date at or before today.
+
+The actual problem: a **missing** air date was being treated as "hasn't aired," when it almost certainly just means TMDB hasn't populated that field yet, common for recently added episodes of a newer show like Spider-Noir. Flipped the default: a missing air date is now treated as available to watch, only a **confirmed future date** excludes an episode now. Applied to both the Watch Next computation and the "+N" count.
+
+Also added this specific check directly into Diagnostics, so if this exact class of bug shows up again on a different show, the report will say so explicitly instead of needing another round of manual detective work.
+
+I can't fully confirm this resolves Spider-Noir specifically without you testing it, if S1E7/S1E8 turn out to have a genuine confirmed future date rather than a missing one, that's a different, legitimate case (an episode that really hasn't released yet), and Diagnostics will now tell us that directly if so.
+
+## This round: the air-date theory was wrong, disproven by your own data, not shipping another guess
+
+Spider-Noir's actual air dates for S1E7/S1E8 are `2026-05-25`, a real date well in the past, not missing and not future. So last round's fix, while still correct to have made, doesn't explain this show's problem at all. I got that one wrong.
+
+Your own observation is the most useful lead so far: shows already in your library (imported) fail to appear, a manually-added show works immediately. That points at something set during import specifically, most likely `isFollowed`/`isArchived`/`tvTimeStatus`, none of which Diagnostics was showing you.
+
+Rather than guess at which of those it is, Diagnostics now shows all of them directly, and **replicates Home's exact inclusion logic** so it gives you a plain YES/NO verdict ("would this show appear in Watch Next right now?") instead of raw numbers you have to interpret yourself. Run it again on Spider-Noir and X-Men '97, whatever it prints for `isFollowed`, `isArchived`, and the two signal checks will point at the exact condition that's failing, and I can fix that specifically instead of theorizing about a fourth possible cause.
+
+
+
 
 
 

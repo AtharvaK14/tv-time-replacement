@@ -90,27 +90,37 @@ export async function ensureSeasonCached(tmdbId: number, seasonNumber: number): 
   await db.episodes.bulkPut(records);
 }
 
-/** The next aired, unwatched episode for a show, in season/episode order. Null if none (up to date, or nothing cached yet). */
+/**
+ * An episode counts as available to watch unless TMDB gives a CONFIRMED
+ * future air date. A missing air date is treated as available, not
+ * excluded, missing data means TMDB doesn't have the date populated yet,
+ * it is not confirmation the episode hasn't aired. Treating missing as
+ * "not aired" was the actual bug behind Watch Next silently hiding
+ * episodes that were correctly marked unwatched but had incomplete TMDB
+ * date data, confirmed via Diagnostics against a real show (Spider-Noir).
+ */
+function isAvailableToWatch(airDate: string | null, today: string): boolean {
+  if (!airDate) return true;
+  return airDate <= today;
+}
+
+/** The next available, unwatched episode for a show, in season/episode order. Null if none (up to date, or nothing cached yet). */
 export function findNextUnwatched(episodes: Episode[], watchedKeys: Set<string>): Episode | null {
   const today = new Date().toISOString().slice(0, 10);
   const sorted = [...episodes].sort((a, b) => a.seasonNumber - b.seasonNumber || a.episodeNumber - b.episodeNumber);
   for (const ep of sorted) {
-    const aired = ep.airDate ? ep.airDate <= today : false;
-    if (aired && !watchedKeys.has(ep.key)) return ep;
+    if (isAvailableToWatch(ep.airDate, today) && !watchedKeys.has(ep.key)) return ep;
   }
   return null;
 }
 
 /**
- * How many aired-but-unwatched episodes exist beyond the immediate next
+ * How many available-but-unwatched episodes exist beyond the immediate next
  * one, for the "+N" badge TV Time shows (e.g. "S01|E04 +4"). Returns 0 if
  * the next episode is the only one waiting.
  */
 export function countAdditionalUnwatched(episodes: Episode[], watchedKeys: Set<string>): number {
   const today = new Date().toISOString().slice(0, 10);
-  const unwatchedAired = episodes.filter((ep) => {
-    const aired = ep.airDate ? ep.airDate <= today : false;
-    return aired && !watchedKeys.has(ep.key);
-  });
-  return Math.max(0, unwatchedAired.length - 1);
+  const unwatchedAvailable = episodes.filter((ep) => isAvailableToWatch(ep.airDate, today) && !watchedKeys.has(ep.key));
+  return Math.max(0, unwatchedAvailable.length - 1);
 }
