@@ -81,22 +81,41 @@ function ShowsHome({ onOpenShow }: { onOpenShow: (tmdbId: number) => void }) {
   const allEpisodes = useLiveQuery(() => db.episodes.toArray(), []);
   const allWatched = useLiveQuery(() => db.watchedEpisodes.toArray(), []);
   const [syncing, setSyncing] = useState(false);
+  const [syncErrors, setSyncErrors] = useState<string[]>([]);
   const [tab, setTab] = useState<"next" | "stale">("next");
 
   // Network side effect: make sure TMDB episode lists are cached for every
   // followed show. Writes to db.episodes, which allEpisodes above reacts to,
   // so newly-synced seasons flow into the computation below automatically
   // as they arrive, not just once at the end.
+  //
+  // Each show is wrapped in its own try/catch: ensureEpisodesCached had no
+  // error handling before, so a single failure (a TMDB rate limit, a
+  // network hiccup, a show TMDB has no data for) threw inside the loop and
+  // silently stopped every show queued after it from ever being synced in
+  // that session. For a small library that's rarely noticeable, for ~190
+  // shows imported at once it meant most of the list could go permanently
+  // unsynced from one bad show. Failures are now collected and surfaced
+  // instead of aborting the whole batch.
   useEffect(() => {
     if (!shows) return;
     let cancelled = false;
     async function sync() {
       setSyncing(true);
+      setSyncErrors([]);
+      const failures: string[] = [];
       for (const show of shows!) {
         if (cancelled) return;
-        await ensureEpisodesCached(show.tmdbId);
+        try {
+          await ensureEpisodesCached(show.tmdbId);
+        } catch (e) {
+          failures.push(`${show.name}: ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
-      if (!cancelled) setSyncing(false);
+      if (!cancelled) {
+        setSyncing(false);
+        setSyncErrors(failures);
+      }
     }
     sync();
     return () => {
@@ -174,6 +193,17 @@ function ShowsHome({ onOpenShow }: { onOpenShow: (tmdbId: number) => void }) {
       </div>
 
       {syncing && <p className="muted small">Syncing episode data from TMDB...</p>}
+
+      {!syncing && syncErrors.length > 0 && (
+        <details className="status-error" style={{ marginBottom: 10 }}>
+          <summary>{syncErrors.length} show(s) failed to sync from TMDB, they may be missing from the lists below</summary>
+          <ul>
+            {syncErrors.map((err) => (
+              <li key={err}>{err}</li>
+            ))}
+          </ul>
+        </details>
+      )}
 
       {activeList.length === 0 && !syncing && (
         <p className="muted">

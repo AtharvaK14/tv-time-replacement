@@ -30,6 +30,7 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
   const [ratings, setRatings] = useState<OmdbRatings | null | "loading">("loading");
   const [inLibrary, setInLibrary] = useState(false);
   const [added, setAdded] = useState(false);
+  const [removeConfirming, setRemoveConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Season accordion state, shows only. Browsing is available whether or not
@@ -139,40 +140,73 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
     }
   }
 
-  async function toggleEpisodeWatched(ep: Episode) {
-    if (!inLibrary) return; // browsing-only until added, see comment above
-    if (watchedKeys.has(ep.key)) {
-      await db.watchedEpisodes.delete(ep.key);
-    } else {
-      await db.watchedEpisodes.put({
+  const [catchUpOffer, setCatchUpOffer] = useState<
+    | { kind: "episodes"; episodes: Episode[]; count: number }
+    | { kind: "seasons"; seasonNumbers: number[] }
+    | null
+  >(null);
+
+  async function markEpisodesWatched(eps: Episode[]) {
+    await db.watchedEpisodes.bulkPut(
+      eps.map((ep) => ({
         key: ep.key,
         showId: ep.showId,
         seasonNumber: ep.seasonNumber,
         episodeNumber: ep.episodeNumber,
         watchedAt: new Date().toISOString(),
         watchCount: 1,
-      });
-    }
+      }))
+    );
     await refreshWatchedAndEpisodes();
+  }
+
+  async function toggleEpisodeWatched(ep: Episode) {
+    if (!inLibrary) return; // browsing-only until added, see comment above
+    if (watchedKeys.has(ep.key)) {
+      await db.watchedEpisodes.delete(ep.key);
+      setCatchUpOffer(null);
+      return;
+    }
+    await markEpisodesWatched([ep]);
+
+    // Offer to catch up on earlier unwatched episodes in the SAME season,
+    // rather than making you check every box individually when you're
+    // just telling the app you're caught up on a show you've been
+    // watching outside it. Doesn't reach into other seasons, those need
+    // their own episode lists fetched first, handled by the season-level
+    // offer below instead.
+    const seasonEps = episodesBySeason.get(ep.seasonNumber) ?? [];
+    const earlierUnwatched = seasonEps.filter((e) => e.episodeNumber < ep.episodeNumber && !watchedKeys.has(e.key));
+    setCatchUpOffer(earlierUnwatched.length > 0 ? { kind: "episodes", episodes: earlierUnwatched, count: earlierUnwatched.length } : null);
   }
 
   async function toggleSeasonWatched(seasonEpisodes: Episode[], markWatched: boolean) {
     if (!inLibrary) return;
     if (markWatched) {
-      await db.watchedEpisodes.bulkPut(
-        seasonEpisodes.map((ep) => ({
-          key: ep.key,
-          showId: ep.showId,
-          seasonNumber: ep.seasonNumber,
-          episodeNumber: ep.episodeNumber,
-          watchedAt: new Date().toISOString(),
-          watchCount: 1,
-        }))
-      );
+      await markEpisodesWatched(seasonEpisodes);
+      const thisSeason = seasonEpisodes[0]?.seasonNumber;
+      const earlierSeasons = seasonNumbers?.filter((n) => n < thisSeason) ?? [];
+      setCatchUpOffer(earlierSeasons.length > 0 ? { kind: "seasons", seasonNumbers: earlierSeasons } : null);
     } else {
       await db.watchedEpisodes.bulkDelete(seasonEpisodes.map((ep) => ep.key));
+      setCatchUpOffer(null);
     }
-    await refreshWatchedAndEpisodes();
+  }
+
+  async function acceptCatchUp() {
+    if (!catchUpOffer) return;
+    if (catchUpOffer.kind === "episodes") {
+      await markEpisodesWatched(catchUpOffer.episodes);
+    } else {
+      for (const seasonNumber of catchUpOffer.seasonNumbers) {
+        await ensureSeasonCached(tmdbId, seasonNumber);
+      }
+      await refreshWatchedAndEpisodes();
+      const freshEpisodes = await db.episodes.where("showId").equals(tmdbId).toArray();
+      const toMark = freshEpisodes.filter((e) => catchUpOffer.seasonNumbers.includes(e.seasonNumber));
+      await markEpisodesWatched(toMark);
+    }
+    setCatchUpOffer(null);
   }
 
   async function handleAdd() {
@@ -207,6 +241,19 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
     }
     setInLibrary(true);
     setAdded(true);
+  }
+
+  async function handleRemove() {
+    if (kind === "show") {
+      await db.watchedEpisodes.where("showId").equals(tmdbId).delete();
+      await db.episodes.where("showId").equals(tmdbId).delete();
+      await db.shows.delete(tmdbId);
+    } else {
+      await db.movies.delete(tmdbId);
+    }
+    setInLibrary(false);
+    setAdded(false);
+    setRemoveConfirming(false);
   }
 
   const episodesBySeason = new Map<number, Episode[]>();
@@ -271,9 +318,26 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
                 </p>
 
                 {inLibrary ? (
-                  <p className="status-ok">
-                    {added ? `Added to your ${kind === "show" ? "Shows" : "Movies"}.` : `Already in your ${kind === "show" ? "Shows" : "Movies"}.`}
-                  </p>
+                  <>
+                    <p className="status-ok">
+                      {added ? `Added to your ${kind === "show" ? "Shows" : "Movies"}.` : `Already in your ${kind === "show" ? "Shows" : "Movies"}.`}
+                    </p>
+                    {!removeConfirming ? (
+                      <button className="danger-button" onClick={() => setRemoveConfirming(true)}>
+                        Remove from {kind === "show" ? "Shows" : "Movies"}
+                      </button>
+                    ) : (
+                      <div className="field-row">
+                        <span className="muted small">
+                          Also deletes {kind === "show" ? "its watch history" : "its watched status"}. No undo.
+                        </span>
+                        <button className="danger-button" onClick={handleRemove}>
+                          Confirm remove
+                        </button>
+                        <button onClick={() => setRemoveConfirming(false)}>Cancel</button>
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <button onClick={handleAdd}>{kind === "show" ? "Add to Shows" : "Add to Movies"}</button>
                 )}
@@ -286,6 +350,19 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
                   <p className="muted small" style={{ marginBottom: 10 }}>
                     Previewing seasons and episodes. Add this show to your Shows to start tracking what you've watched.
                   </p>
+                )}
+                {catchUpOffer && (
+                  <div className="catch-up-offer">
+                    <span>
+                      {catchUpOffer.kind === "episodes"
+                        ? `Also mark the ${catchUpOffer.count} episode${catchUpOffer.count === 1 ? "" : "s"} before this one (in this season) as watched?`
+                        : `Also mark all ${catchUpOffer.seasonNumbers.length} earlier season${catchUpOffer.seasonNumbers.length === 1 ? "" : "s"} as fully watched?`}
+                    </span>
+                    <div className="field-row">
+                      <button onClick={acceptCatchUp}>Yes, catch up</button>
+                      <button onClick={() => setCatchUpOffer(null)}>No, just this one</button>
+                    </div>
+                  </div>
                 )}
                 {seasonNumbers!.map((seasonNumber) => {
                   const isExpanded = expandedSeason === seasonNumber;

@@ -319,13 +319,20 @@ Also added this specific check directly into Diagnostics, so if this exact class
 
 I can't fully confirm this resolves Spider-Noir specifically without you testing it, if S1E7/S1E8 turn out to have a genuine confirmed future date rather than a missing one, that's a different, legitimate case (an episode that really hasn't released yet), and Diagnostics will now tell us that directly if so.
 
-## This round: the air-date theory was wrong, disproven by your own data, not shipping another guess
+## This round: found the actual Watch Next bug via re-reading the sync code, plus a batch of requested features
 
-Spider-Noir's actual air dates for S1E7/S1E8 are `2026-05-25`, a real date well in the past, not missing and not future. So last round's fix, while still correct to have made, doesn't explain this show's problem at all. I got that one wrong.
+**The real bug this time: no error handling in the episode-sync loop.** `ensureEpisodesCached` had no try/catch, and Home's sync ran it sequentially for every followed show in one loop. If even one show threw (a TMDB rate limit, a network hiccup, a show TMDB has incomplete data for), the whole loop stopped right there, silently, and every show queued after it in the array never got synced in that session. For a couple of manually-added shows this would rarely trigger. For ~190 imported at once, one bad show could quietly take out most of the list. Fixed: each show now gets its own try/catch, failures are collected instead of aborting the batch, and Home now tells you directly if any shows failed to sync instead of just silently showing nothing for them.
 
-Your own observation is the most useful lead so far: shows already in your library (imported) fail to appear, a manually-added show works immediately. That points at something set during import specifically, most likely `isFollowed`/`isArchived`/`tvTimeStatus`, none of which Diagnostics was showing you.
+**Layout and UI fixes:**
+- Widened the main content area and enlarged grid tiles, less wasted space on wider screens.
+- API keys are now masked (password-style dots) with a Show/Hide toggle, not plain text by default.
+- Added Remove from Shows/Movies in the details panel, symmetric with Add, with a confirmation step since it deletes watch history for that title.
 
-Rather than guess at which of those it is, Diagnostics now shows all of them directly, and **replicates Home's exact inclusion logic** so it gives you a plain YES/NO verdict ("would this show appear in Watch Next right now?") instead of raw numbers you have to interpret yourself. Run it again on Spider-Noir and X-Men '97, whatever it prints for `isFollowed`, `isArchived`, and the two signal checks will point at the exact condition that's failing, and I can fix that specifically instead of theorizing about a fourth possible cause.
+**Shows section:**
+- Restyled the season browser (clearer separation between seasons, bigger episode thumbnails).
+- Added "catch up" offers: marking an episode watched now offers to also mark earlier unwatched episodes in that season; marking a whole season watched offers to also mark all earlier seasons watched. Neither is forced, both show as a dismissible offer after the normal action, so single-episode marking still behaves exactly as before when there's nothing earlier to catch up on.
+
+**Still open, need your input**: you asked to "modify the filter we have right now" in Shows, but didn't say which way, more options, fewer, different layout, something else. Rather than guess at this one, tell me specifically what's wrong with it and I'll fix that directly.
 
 
 

@@ -10,8 +10,10 @@ type KeyStatus = "idle" | "checking" | "valid" | "invalid";
 function ApiKeys() {
   const [tmdbKey, setTmdbKey] = useState("");
   const [tmdbStatus, setTmdbStatus] = useState<KeyStatus>("idle");
+  const [tmdbVisible, setTmdbVisible] = useState(false);
   const [omdbKey, setOmdbKey] = useState("");
   const [omdbStatus, setOmdbStatus] = useState<KeyStatus>("idle");
+  const [omdbVisible, setOmdbVisible] = useState(false);
 
   useEffect(() => {
     const savedTmdb = localStorage.getItem("tmdb_api_key");
@@ -60,7 +62,16 @@ function ApiKeys() {
           under non-commercial terms.
         </p>
         <div className="field-row">
-          <input type="text" value={tmdbKey} onChange={(e) => setTmdbKey(e.target.value)} placeholder="TMDB API key (v3)" />
+          <input
+            type={tmdbVisible ? "text" : "password"}
+            value={tmdbKey}
+            onChange={(e) => setTmdbKey(e.target.value)}
+            placeholder="TMDB API key (v3)"
+            autoComplete="off"
+          />
+          <button onClick={() => setTmdbVisible((v) => !v)} aria-label={tmdbVisible ? "Hide key" : "Show key"}>
+            {tmdbVisible ? "Hide" : "Show"}
+          </button>
           <button onClick={saveTmdb} disabled={!tmdbKey.trim() || tmdbStatus === "checking"}>
             {tmdbStatus === "checking" ? "Checking..." : "Save"}
           </button>
@@ -81,7 +92,16 @@ function ApiKeys() {
           limitation, not a bug here.
         </p>
         <div className="field-row">
-          <input type="text" value={omdbKey} onChange={(e) => setOmdbKey(e.target.value)} placeholder="OMDb API key" />
+          <input
+            type={omdbVisible ? "text" : "password"}
+            value={omdbKey}
+            onChange={(e) => setOmdbKey(e.target.value)}
+            placeholder="OMDb API key"
+            autoComplete="off"
+          />
+          <button onClick={() => setOmdbVisible((v) => !v)} aria-label={omdbVisible ? "Hide key" : "Show key"}>
+            {omdbVisible ? "Hide" : "Show"}
+          </button>
           <button onClick={saveOmdb} disabled={!omdbKey.trim() || omdbStatus === "checking"}>
             {omdbStatus === "checking" ? "Checking..." : "Save"}
           </button>

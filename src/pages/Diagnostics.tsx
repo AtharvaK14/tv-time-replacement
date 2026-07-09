@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, episodeKey } from "../db";
-import { ensureEpisodesCached, findNextUnwatched } from "../lib/episodeSync";
+import { ensureEpisodesCached } from "../lib/episodeSync";
 
 export default function Diagnostics() {
   const shows = useLiveQuery(() => db.shows.orderBy("name").toArray(), []);
@@ -31,30 +31,6 @@ export default function Diagnostics() {
 
     const lines: string[] = [];
     lines.push(`Show: ${show?.name} (tmdbId ${tmdbId})`);
-
-    // Show-level flags, exactly what Home's base query and hasMoreToWatch
-    // check, spelled out directly rather than left for you to infer from
-    // raw watched/cached counts.
-    lines.push("");
-    lines.push("--- Home screen eligibility ---");
-    lines.push(`isFollowed: ${show?.isFollowed}`);
-    lines.push(`isArchived: ${show?.isArchived}`);
-    lines.push(`tvTimeStatus (from import): ${show?.tvTimeStatus ?? "not set (manually added, or older import)"}`);
-    const passesBaseFilter = !!show?.isFollowed && !show?.isArchived;
-    lines.push(
-      `Passes Home's base filter (isFollowed && !isArchived): ${passesBaseFilter}` +
-        (passesBaseFilter ? "" : "  <-- EXCLUDED HERE, never even reaches the watch-next check below")
-    );
-
-    const next = findNextUnwatched(cachedEpisodes, watchedKeySet);
-    const liveSignal = next !== null && watched.length > 0;
-    const statusSignal = show?.tvTimeStatus === "continuing";
-    const wouldShowInWatchNext = passesBaseFilter && (statusSignal || liveSignal);
-    lines.push(`Live signal (has an available unwatched episode AND at least 1 watched): ${liveSignal}`);
-    lines.push(`Status signal (tvTimeStatus === "continuing"): ${statusSignal}`);
-    lines.push(`VERDICT: would this show appear in Watch Next right now? ${wouldShowInWatchNext ? "YES" : "NO"}`);
-    lines.push("");
-
     lines.push(`Watched records in IndexedDB: ${watched.length}`);
     lines.push(`Cached TMDB episodes: ${cachedEpisodes.length}`);
     lines.push(`Orphaned watched records (no matching TMDB episode key): ${orphanedWatched.length}`);
@@ -86,11 +62,6 @@ export default function Diagnostics() {
             `is treated as available.`
         );
       }
-    }
-    if (next) {
-      lines.push(`Next episode findNextUnwatched would pick: S${next.seasonNumber}E${next.episodeNumber} (key=${next.key})`);
-    } else {
-      lines.push(`findNextUnwatched found nothing available and unwatched.`);
     }
     // Direct spot check: does S1E1 exist on both sides, and do the keys match exactly?
     const expectedS1E1Key = episodeKey(tmdbId, 1, 1);

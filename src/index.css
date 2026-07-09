@@ -23,7 +23,7 @@ body {
 
 #root { min-height: 100vh; }
 
-.app-shell { max-width: 960px; margin: 0 auto; padding: 0 20px 60px; }
+.app-shell { max-width: 1280px; margin: 0 auto; padding: 0 24px 60px; }
 
 .app-header {
   display: flex;
@@ -105,8 +105,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .show-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 18px;
   margin-top: 8px;
 }
 
@@ -328,3 +328,14 @@ hr { border: none; border-top: 1px solid var(--border); }
   display: flex; align-items: center; justify-content: center;
 }
 .watch-toggle-circle:disabled { background: var(--surface-raised); color: var(--muted); opacity: 0.5; }
+
+.catch-up-offer {
+  background: var(--surface-raised); border: 1px solid var(--accent-dim); border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 8px; font-size: 0.9rem;
+}
+
+/* Season section restyle: clearer separation, bigger touch targets */
+.season-block { border-top: 1px solid var(--border); padding: 14px 0; }
+.season-header h3 { font-size: 1rem; }
+.episode-row { padding: 8px 4px !important; }
+.episode-thumb { width: 72px; height: 40px; }
