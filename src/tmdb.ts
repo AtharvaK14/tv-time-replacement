@@ -1,5 +1,11 @@
 const TMDB_BASE = "https://api.themoviedb.org/3";
 export const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w342";
+// w780 is TMDB's documented "Medium" backdrop size (their sizes are
+// w300/w780/w1280/original for backdrops specifically, a different size
+// ladder than posters), verified against TMDB's own image-path reference
+// rather than assumed. Appropriate width for a ~190px-tall hero banner
+// without shipping a full 1280w/original image for that.
+export const TMDB_BACKDROP_BASE = "https://image.tmdb.org/t/p/w780";
 
 function getApiKey(): string {
   const key = localStorage.getItem("tmdb_api_key");
@@ -72,6 +78,7 @@ export interface TvShowDetails {
   name: string;
   status: string;
   poster_path: string | null;
+  backdrop_path: string | null;
   first_air_date: string | null;
   overview: string | null;
   number_of_seasons: number;
@@ -108,6 +115,7 @@ export interface MovieDetails {
   title: string;
   release_date: string | null;
   poster_path: string | null;
+  backdrop_path: string | null;
   overview: string | null;
   runtime: number | null; // minutes
   genres: { id: number; name: string }[];
@@ -138,10 +146,6 @@ export async function getMovieGenres(): Promise<Genre[]> {
 // ---- Discovery (Add page suggestions) ----------------------------------------
 
 export async function getPopularTvShows(): Promise<TvSearchResult[]> {
-  // TMDB's own docs: "popularity" is a lifetime aggregate score, not a
-  // "right now" signal, that's what caused decades-old or niche shows to
-  // show up under a "right now" label. "Trending" is TMDB's actual concept
-  // for that, confirmed via their popularity-and-trending documentation.
   const data = await tmdbGet<{ results: TvSearchResult[] }>("/trending/tv/week");
   return data.results;
 }
@@ -152,24 +156,10 @@ export async function getPopularMovies(): Promise<MovieSearchResult[]> {
 }
 
 export async function getUpcomingMovies(): Promise<MovieSearchResult[]> {
-  // Without a region, TMDB's /movie/upcoming treats a film as "upcoming" if
-  // it hasn't released ANYWHERE in the world yet, so something already out
-  // in the US but not yet in, say, Japan still qualifies. Confirmed via
-  // multiple real TMDB bug reports matching this exact symptom (movies a
-  // month past their US release still showing as upcoming). region=US
-  // filters to US release dates specifically.
   const data = await tmdbGet<{ results: MovieSearchResult[] }>("/movie/upcoming", { region: "US" });
   return data.results;
 }
 
-/**
- * TMDB's closest equivalent to Rotten Tomatoes' "Movies at Home" (recent
- * digital/home releases). TMDB doesn't have a dedicated "at home" endpoint,
- * this uses /discover/movie filtered to release type 4 (Digital, confirmed
- * via TMDB's own release_dates documentation) within the last ~45 days,
- * sorted newest first. It's a real equivalent built from documented TMDB
- * filters, not the same curation RT does, worth treating as an approximation.
- */
 export async function getRecentlyAvailableAtHome(): Promise<MovieSearchResult[]> {
   const today = new Date();
   const past = new Date(today.getTime() - 45 * 24 * 60 * 60 * 1000);
@@ -198,11 +188,6 @@ export async function discoverMovies(filters: DiscoverFilters): Promise<MovieSea
 }
 
 // ---- Exact ID-based lookup, verified against TMDB's own community docs -----
-// Confirmed working for external_source values "imdb_id" and "tvdb_id",
-// covering both movie_results and tv_results. This is an exact ID join, not
-// a fuzzy title search, and is used as the PRIMARY matching path whenever
-// the TV Time export gives us an IMDb or TVDB ID, only falling back to the
-// fuzzy title matcher when no ID is available or the ID lookup comes up empty.
 
 export interface FindResults {
   movie_results: MovieSearchResult[];

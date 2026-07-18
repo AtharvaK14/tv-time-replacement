@@ -33,7 +33,7 @@ function App() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <span className="brand">Reel</span>
+        <span className="brand">WatchTime</span>
         {/* Hidden below 640px via CSS, the bottom-nav takes over there.
             Settings is icon-only at every width (that's the "more space"
             fix), the other four keep their text labels here since desktop/

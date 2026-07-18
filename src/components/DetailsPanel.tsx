@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { db, type Episode } from "../db";
-import { getTvShowDetails, getMovieDetails, TMDB_IMAGE_BASE } from "../tmdb";
+import { getTvShowDetails, getMovieDetails, TMDB_IMAGE_BASE, TMDB_BACKDROP_BASE } from "../tmdb";
 import { getOmdbRatings, hasOmdbKey, type OmdbRatings } from "../omdb";
 import { averageRuntime } from "../lib/runtime";
 import { getSeasonNumbers, ensureSeasonCached } from "../lib/episodeSync";
@@ -18,6 +18,7 @@ interface Props {
 interface CoreDetails {
   name: string;
   posterPath: string | null;
+  backdropPath: string | null; // horizontal image, used unblurred in the mobile hero when TMDB has one
   releaseDate: string | null;
   overview: string | null;
   status?: string; // shows only
@@ -80,6 +81,7 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
           setDetails({
             name: d.name,
             posterPath: d.poster_path,
+            backdropPath: d.backdrop_path,
             releaseDate: d.first_air_date,
             overview: d.overview,
             status: d.status,
@@ -111,6 +113,7 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
           setDetails({
             name: d.title,
             posterPath: d.poster_path,
+            backdropPath: d.backdrop_path,
             releaseDate: d.release_date,
             overview: d.overview,
             runtimeMinutes: d.runtime,
@@ -302,10 +305,6 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
         {!hasOmdbKey() && <span className="muted small">Add an OMDb key in Settings to see IMDb/RT ratings.</span>}
       </div>
 
-      <p className="overview">
-        {details.overview || (ratings !== "loading" && ratings?.plot) || "No summary available."}
-      </p>
-
       {inLibrary ? (
         <>
           <p className="status-ok">
@@ -330,6 +329,10 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
       ) : (
         <button onClick={handleAdd}>{kind === "show" ? "Add to Shows" : "Add to Movies"}</button>
       )}
+
+      <p className="overview">
+        {details.overview || (ratings !== "loading" && ratings?.plot) || "No summary available."}
+      </p>
     </>
   );
 
@@ -454,7 +457,7 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
             <div className="sheet-drag-handle-bar" />
           </div>
 
-          <button className="close-x" onClick={onClose} aria-label="Close">
+          <button className="close-x hero-close-x" onClick={onClose} aria-label="Close">
             &times;
           </button>
 
@@ -464,23 +467,26 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
 
             {details && (
               <>
-                <div className="details-hero">
-                  {details.posterPath && (
-                    <div
-                      className="details-hero-bg"
-                      style={{ backgroundImage: `url(${TMDB_IMAGE_BASE}${details.posterPath})` }}
-                    />
-                  )}
-                  <div className="details-hero-scrim" />
-                  {details.posterPath ? (
+                <div className={`details-hero ${details.backdropPath ? "centered" : ""}`}>
+                  {details.backdropPath ? (
+                    // Real horizontal image from TMDB, shown sharp, no blur needed.
                     <img
-                      src={`${TMDB_IMAGE_BASE}${details.posterPath}`}
-                      alt={details.name}
-                      className="details-hero-poster"
+                      src={`${TMDB_BACKDROP_BASE}${details.backdropPath}`}
+                      alt=""
+                      className="details-hero-bg-sharp"
                     />
                   ) : (
-                    <div className="poster-placeholder details-hero-poster" />
+                    // No backdrop for this title (uncommon but happens), fall back to
+                    // the vertical poster, blurred since it's the wrong aspect ratio
+                    // to show sharp as a wide banner.
+                    details.posterPath && (
+                      <div
+                        className="details-hero-bg-blurred"
+                        style={{ backgroundImage: `url(${TMDB_IMAGE_BASE}${details.posterPath})` }}
+                      />
+                    )
                   )}
+                  <div className="details-hero-scrim" />
                   <h2 className="details-hero-title">{details.name}</h2>
                 </div>
 
