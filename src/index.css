@@ -110,6 +110,21 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   margin-top: 8px;
 }
 
+@media (max-width: 640px) {
+  .show-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+  .show-card-body { padding: 6px; }
+  .show-name { font-size: 0.78rem; }
+}
+
+@media (max-width: 360px) {
+  .show-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 .show-card {
   display: flex;
   flex-direction: column;
@@ -141,6 +156,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
   padding: 20px; max-width: 480px; width: 100%; max-height: 80vh; overflow-y: auto;
   display: flex; flex-direction: column; gap: 12px;
+  overscroll-behavior: contain;
 }
 
 .candidate-list { display: flex; flex-direction: column; gap: 8px; }
@@ -198,7 +214,7 @@ hr { border: none; border-top: 1px solid var(--border); }
 .details-modal { max-width: 640px; position: relative; }
 .close-x {
   position: absolute; top: 10px; right: 10px; background: none; border: none; color: var(--muted);
-  font-size: 1.4rem; line-height: 1; padding: 4px 8px;
+  font-size: 1.4rem; line-height: 1; padding: 4px 8px; z-index: 2;
 }
 .details-layout { display: flex; gap: 20px; align-items: flex-start; }
 .details-poster { width: 160px; aspect-ratio: 2/3; object-fit: cover; border-radius: 8px; flex-shrink: 0; }
@@ -241,7 +257,7 @@ hr { border: none; border-top: 1px solid var(--border); }
 /* Wider modal when the season browser is showing */
 .details-modal-wide { max-width: 720px; }
 
-.season-browser { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px; max-height: 50vh; overflow-y: auto; }
+.season-browser { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px; max-height: 50vh; overflow-y: auto; overscroll-behavior: contain; }
 .season-header-right { display: flex; align-items: center; gap: 10px; }
 
 .episode-row {
@@ -339,3 +355,190 @@ hr { border: none; border-top: 1px solid var(--border); }
 .season-header h3 { font-size: 1rem; }
 .episode-row { padding: 8px 4px !important; }
 .episode-thumb { width: 72px; height: 40px; }
+
+/* ============================================================
+   Draggable bottom sheet (DetailsPanel only). Everything above
+   this point is unchanged from before. EpisodeDetailsPanel and
+   the import disambiguation modal still use the plain centered
+   .modal-backdrop/.modal pattern, deliberately not converted,
+   see the chat writeup for why only DetailsPanel became a sheet.
+   ============================================================ */
+
+.details-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 12px; /* the "small gap at the top" when fully dragged up. Keep this
+                in sync with SHEET_TOP_GAP_PX in useDraggableSheet.ts if you
+                change it, the hook's collapsed/expanded math assumes this
+                exact value. */
+  bottom: 0;
+  max-width: 640px;
+  margin: 0 auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 16px 16px 0 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* .sheet-scroll-area below handles all scrolling, not this */
+  will-change: transform;
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.35);
+}
+.details-sheet.details-modal-wide { max-width: 720px; }
+
+.sheet-drag-handle {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  padding: 10px 0 6px;
+  cursor: grab;
+  touch-action: none; /* stop the browser claiming this gesture for native
+                          page-scroll before our pointer handlers see it */
+}
+.sheet-drag-handle:active { cursor: grabbing; }
+.sheet-drag-handle-bar {
+  width: 40px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.sheet-scroll-area {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 20px 24px;
+}
+
+/* Hero header: blurred poster fills the banner, sharp thumbnail + title
+   overlap it at the bottom edge, everything else (release year, genres,
+   season count, status) sits in its own block below, never overlapping. */
+.details-hero {
+  position: relative;
+  height: 190px;
+  margin: 0 -20px; /* bleed to the sheet's edges, cancels .sheet-scroll-area's side padding */
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  padding: 16px 20px;
+}
+.details-hero-bg {
+  position: absolute;
+  inset: -24px; /* oversized so the blur radius never reveals a sharp edge */
+  background-size: cover;
+  background-position: center 20%;
+  filter: blur(22px) saturate(1.25) brightness(0.75);
+  transform: scale(1.15);
+}
+.details-hero-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(18, 21, 26, 0) 0%, rgba(18, 21, 26, 0.92) 100%);
+}
+.details-hero-poster {
+  position: relative;
+  z-index: 1;
+  width: 84px;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+  flex-shrink: 0;
+}
+.details-hero-title {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  font-size: 1.25rem;
+  line-height: 1.25;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+}
+.details-meta-line {
+  margin: 12px 0 0;
+}
+
+/* ============================================================
+   Responsive nav. Append this block to the end of index.css.
+   Top nav (.top-nav, inside .app-header) is used above 640px.
+   Bottom tab bar (.bottom-nav) takes over below 640px, a single
+   text row can't fit 5 tabs + the logo at phone widths no matter
+   how the top nav is styled, so it's hidden there entirely
+   rather than trying to keep shrinking it.
+   ============================================================ */
+
+.app-header nav.top-nav button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bottom-nav {
+  display: none; /* shown only inside the media query below */
+}
+
+@media (max-width: 640px) {
+  .app-header nav.top-nav {
+    display: none;
+  }
+
+  /* Room at the bottom so the last row of content in any page isn't
+     hidden behind the fixed bottom nav. env(safe-area-inset-bottom)
+     accounts for the home-indicator strip on notched iPhones. */
+  .app-shell {
+    padding: 0 16px calc(72px + env(safe-area-inset-bottom));
+  }
+
+  .bottom-nav {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+    z-index: 5; /* below modals (z-index:10), above ordinary page content */
+  }
+
+  .bottom-nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    background: none;
+    border: none;
+    color: var(--muted);
+    padding: 6px 2px;
+    border-radius: 10px;
+    font-size: 0.68rem;
+  }
+
+  .bottom-nav-item.active {
+    color: var(--accent);
+  }
+}
+
+/* ============================================================
+   Compact filter bar on mobile. Append to the end of index.css.
+   Scoped to .filters-row specifically (added to the Shows and
+   Movies filter divs), NOT the generic .field-row class, which
+   is reused in Settings/AddTitle/Diagnostics and is left alone.
+   ============================================================ */
+
+@media (max-width: 640px) {
+  .filters-row input[type="text"] {
+    flex: 1 1 100%; /* search gets its own full-width row */
+    min-width: 0;
+  }
+
+  .filters-row select {
+    flex: 1 1 0; /* the three selects then share the next row evenly */
+    min-width: 0;
+    font-size: 0.82rem;
+    padding: 8px 6px;
+  }
+}

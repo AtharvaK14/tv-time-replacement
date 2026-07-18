@@ -334,6 +334,31 @@ I can't fully confirm this resolves Spider-Noir specifically without you testing
 
 **Still open, need your input**: you asked to "modify the filter we have right now" in Shows, but didn't say which way, more options, fewer, different layout, something else. Rather than guess at this one, tell me specifically what's wrong with it and I'll fix that directly.
 
+## This round: a real regression I introduced last round, plus layout fixes
+
+**Confirmed by inspection, not another guess**: last round's "catch up" feature added an early `return` in the unwatch code path that skipped the local state refresh, so unchecking an episode (or clicking "Mark unwatched" on a season) deleted the record correctly in IndexedDB but the screen never found out, hence needing to close and reopen to see it. Fixed both the episode-level and season-level unwatch paths.
+
+**Layout**: the details panel's top section (poster, overview, ratings) had no height limit, so a long overview could push the episode list mostly off-screen on a shorter laptop viewport, plus there were two competing scroll regions (the outer modal and the season list) fighting for space. Restructured so the top section stays compact (overview capped and scrollable on its own if long) and the season list gets the dominant share of a single, coherent scroll area instead.
+
+**The catch-up offer is now a real pop-up**, not a banner at the top of a list you can scroll past without noticing.
+
+## This round: the actual empty-space fix, not just a smaller scrollbox
+
+Last round's fix was the wrong kind of fix, capping the overview to a tiny scrollable box instead of addressing why there was dead space in the first place. The real cause: the poster's height (fixed by its 2:3 aspect ratio) was taller than the text column's natural content, and the text column was pinned to the top instead of stretching to match. Fixed properly: the text column now stretches to the poster's full height (safe to do now that the poster has an explicit aspect ratio protecting it from distortion), and the overview text grows into whatever space that leaves, only scrolling if it's still genuinely too long, instead of being artificially boxed in.
+
+Also themed the scrollbars (thin, dark, matching the app's border/accent colors) across the overview, season browser, episode list, and modals generally, instead of the default light-gray browser scrollbar standing out against the dark UI.
+
+## This round: the actual root cause of the empty space, and a real mobile pass
+
+**Found it by checking for what I should have checked the first time**: `h2`/`h3` already had their default margins reset to zero, `<p>` never did. Every paragraph (the meta line, the rating row, the overview, the status text) was carrying its own default browser margin on top of the flex `gap`, and those compounded. Fixed with the same reset already applied to headings. This also freed up real room for the season list, which was the second half of your complaint, both were caused by the same bug.
+
+**Mobile had zero responsive CSS before this**, not a small oversight, a genuinely unstyled state for anything narrower than a laptop. That's the real explanation for the misalignment. The scroll-wheel problem specifically is about nested scroll regions: the modal, the season list, and the overview each scrolling independently is a reasonable way to use limited space efficiently on desktop, but multiple nested `overflow:auto` regions are known to fight over touch swipe gestures unpredictably on phones. Added a real mobile breakpoint that collapses back down to one scrolling region (the whole modal) on small screens, stacks the poster above the text instead of squeezing them side by side, and resizes the grid, thumbnails, and nav for a narrow viewport.
+
+**Honest caveat**: I don't have a phone or a way to test touch gestures in this environment, this is built from standard, well-established responsive patterns, not verified on an actual device. Test on your phone and tell me specifically what still doesn't feel right, that's more useful than me guessing at further tweaks blind.
+
+
+
+
 
 
 

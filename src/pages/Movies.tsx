@@ -97,7 +97,7 @@ export default function Movies() {
         <p className="muted">No movies yet. Import your TV Time export, or add one below.</p>
       ) : (
         <>
-          <div className="field-row">
+          <div className="field-row filters-row">
             <input
               type="text"
               value={query}

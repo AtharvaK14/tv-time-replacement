@@ -127,7 +127,7 @@ export default function Library() {
         <p className="muted">No shows yet. Import your TV Time export, or search TMDB from Add.</p>
       ) : (
         <>
-          <div className="field-row">
+          <div className="field-row filters-row">
             <input
               type="text"
               value={query}

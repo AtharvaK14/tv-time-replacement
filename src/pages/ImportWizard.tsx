@@ -3,6 +3,7 @@ import { runImport, type ImportProgress, type ImportResult } from "../importer/r
 import { runJsonImport, type JsonImportProgress, type JsonImportResult } from "../importer/runJsonImport";
 import type { DisambiguationCandidate, ResolveAmbiguous } from "../importer/matcher";
 import { TMDB_IMAGE_BASE, hasApiKey } from "../tmdb";
+import { useLockBodyScroll } from "../lib/useLockBodyScroll";
 
 interface PendingChoice {
   rawTitle: string;
@@ -32,6 +33,34 @@ function MatchBreakdown({ counts }: { counts: Record<string, number> }) {
         {counts.skipped > 0 && <li>{counts.skipped} skipped, no confident match</li>}
       </ul>
     </details>
+  );
+}
+
+// Split out from the main component specifically so useLockBodyScroll can be
+// called unconditionally here. ImportWizard itself is mounted for as long as
+// the Import section of Settings is expanded, not just while this picker is
+// showing, so the hook can't live directly in ImportWizard without locking
+// scroll the whole time Import is open rather than only while this modal is.
+function DisambiguationModal({ pending, onChoose }: { pending: PendingChoice; onChoose: (id: number | null) => void }) {
+  useLockBodyScroll();
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <h3>Which "{pending.rawTitle}"?</h3>
+        <p className="muted small">Couldn't resolve this by ID, so pick the right match.</p>
+        <div className="candidate-list">
+          {pending.candidates.map((c) => (
+            <button key={c.tmdbId} className="candidate" onClick={() => onChoose(c.tmdbId)}>
+              {c.posterPath && <img src={`${TMDB_IMAGE_BASE}${c.posterPath}`} alt="" />}
+              <span>{c.label}</span>
+            </button>
+          ))}
+        </div>
+        <button className="skip" onClick={() => onChoose(null)}>
+          Skip this title
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -269,25 +298,7 @@ export default function ImportWizard() {
         <CsvImportPanel resolveAmbiguous={resolveAmbiguous} />
       )}
 
-      {pending && (
-        <div className="modal-backdrop">
-          <div className="modal">
-            <h3>Which "{pending.rawTitle}"?</h3>
-            <p className="muted small">Couldn't resolve this by ID, so pick the right match.</p>
-            <div className="candidate-list">
-              {pending.candidates.map((c) => (
-                <button key={c.tmdbId} className="candidate" onClick={() => choose(c.tmdbId)}>
-                  {c.posterPath && <img src={`${TMDB_IMAGE_BASE}${c.posterPath}`} alt="" />}
-                  <span>{c.label}</span>
-                </button>
-              ))}
-            </div>
-            <button className="skip" onClick={() => choose(null)}>
-              Skip this title
-            </button>
-          </div>
-        </div>
-      )}
+      {pending && <DisambiguationModal pending={pending} onChoose={choose} />}
     </div>
   );
 }

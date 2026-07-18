@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Episode } from "../db";
 import { TMDB_IMAGE_BASE } from "../tmdb";
 import { getOmdbEpisodeRating, hasOmdbKey, type OmdbEpisodeRating } from "../omdb";
+import { useLockBodyScroll } from "../lib/useLockBodyScroll";
 
 interface Props {
   show: { name: string; imdbId?: string | null };
@@ -13,6 +14,12 @@ interface Props {
 }
 
 export default function EpisodeDetailsPanel({ show, episode, watched, canToggleWatched = true, onToggleWatched, onClose }: Props) {
+  // Same reference-counted lock DetailsPanel uses. This panel is often
+  // opened FROM WITHIN an already-open DetailsPanel (both call this hook),
+  // the ref-counting in useLockBodyScroll ensures closing this one doesn't
+  // prematurely unlock scroll while the parent panel is still open.
+  useLockBodyScroll();
+
   const [rating, setRating] = useState<OmdbEpisodeRating | null | "loading">("loading");
 
   useEffect(() => {

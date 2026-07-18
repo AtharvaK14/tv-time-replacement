@@ -4,6 +4,9 @@ import { getTvShowDetails, getMovieDetails, TMDB_IMAGE_BASE } from "../tmdb";
 import { getOmdbRatings, hasOmdbKey, type OmdbRatings } from "../omdb";
 import { averageRuntime } from "../lib/runtime";
 import { getSeasonNumbers, ensureSeasonCached } from "../lib/episodeSync";
+import { useDraggableSheet } from "../lib/useDraggableSheet";
+import { useLockBodyScroll } from "../lib/useLockBodyScroll";
+import { useIsMobile } from "../lib/useIsMobile";
 import EpisodeDetailsPanel from "./EpisodeDetailsPanel";
 
 interface Props {
@@ -25,7 +28,34 @@ interface CoreDetails {
   genres: string[];
 }
 
+/** Release year / genres / season count / status, shared by both the
+ * desktop header (next to the poster) and the mobile header (below the
+ * hero banner), so the two render paths never drift out of sync on what
+ * they display. */
+function MetaLine({ details }: { details: CoreDetails }) {
+  return (
+    <>
+      {details.releaseDate ? details.releaseDate.slice(0, 4) : "Release date unknown"}
+      {details.genres.length > 0 ? ` \u00b7 ${details.genres.join(", ")}` : ""}
+      {details.numberOfSeasons
+        ? ` \u00b7 ${details.numberOfSeasons} season${details.numberOfSeasons === 1 ? "" : "s"}`
+        : ""}
+      {details.status ? ` \u00b7 ${details.status}` : ""}
+    </>
+  );
+}
+
 export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
+  // This component is only ever mounted while its modal is open (callers
+  // use `{openDetails !== null && <DetailsPanel .../>}`), so it's safe to
+  // call these unconditionally, they mount/unmount together with the panel.
+  // useLockBodyScroll applies on BOTH mobile and desktop, that bug wasn't
+  // mobile-specific. useDraggableSheet's output is only wired into the
+  // JSX on the mobile render path below, it's inert otherwise.
+  useLockBodyScroll();
+  const { sheetStyle, handleProps } = useDraggableSheet();
+  const isMobile = useIsMobile();
+
   const [details, setDetails] = useState<CoreDetails | null>(null);
   const [ratings, setRatings] = useState<OmdbRatings | null | "loading">("loading");
   const [inLibrary, setInLibrary] = useState(false);
@@ -33,9 +63,6 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
   const [removeConfirming, setRemoveConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Season accordion state, shows only. Browsing is available whether or not
-  // the show is in your library, marking episodes watched requires adding
-  // it first (a watch record with nothing to attach it to doesn't make sense).
   const [seasonNumbers, setSeasonNumbers] = useState<number[] | null>(null);
   const [expandedSeason, setExpandedSeason] = useState<number | null>(null);
   const [loadingSeason, setLoadingSeason] = useState<number | null>(null);
@@ -63,9 +90,6 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
           });
           const existing = await db.shows.get(tmdbId);
           setInLibrary(!!existing);
-          // Season list is available for browsing regardless of library
-          // status now, per feedback that previewing a show's seasons
-          // before adding it is useful, not just after.
           const nums = await getSeasonNumbers(tmdbId);
           if (!cancelled) setSeasonNumbers(nums);
           if (existing) {
@@ -161,7 +185,7 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
   }
 
   async function toggleEpisodeWatched(ep: Episode) {
-    if (!inLibrary) return; // browsing-only until added, see comment above
+    if (!inLibrary) return;
     if (watchedKeys.has(ep.key)) {
       await db.watchedEpisodes.delete(ep.key);
       setCatchUpOffer(null);
@@ -169,12 +193,6 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
     }
     await markEpisodesWatched([ep]);
 
-    // Offer to catch up on earlier unwatched episodes in the SAME season,
-    // rather than making you check every box individually when you're
-    // just telling the app you're caught up on a show you've been
-    // watching outside it. Doesn't reach into other seasons, those need
-    // their own episode lists fetched first, handled by the season-level
-    // offer below instead.
     const seasonEps = episodesBySeason.get(ep.seasonNumber) ?? [];
     const earlierUnwatched = seasonEps.filter((e) => e.episodeNumber < ep.episodeNumber && !watchedKeys.has(e.key));
     setCatchUpOffer(earlierUnwatched.length > 0 ? { kind: "episodes", episodes: earlierUnwatched, count: earlierUnwatched.length } : null);
@@ -266,6 +284,223 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
 
   const showsSeasonBrowser = kind === "show" && seasonNumbers !== null;
 
+  const bodyContent = details && (
+    <>
+      <div className="ratings-row">
+        {ratings === "loading" && hasOmdbKey() && <span className="muted small">Loading ratings...</span>}
+        {ratings && ratings !== "loading" && (
+          <>
+            {ratings.imdbRating && <span className="rating-pill">IMDb {ratings.imdbRating}</span>}
+            {ratings.rottenTomatoes && <span className="rating-pill">RT {ratings.rottenTomatoes}</span>}
+            {!ratings.imdbRating && !ratings.rottenTomatoes && (
+              <span className="muted small">
+                {ratings.error ? `OMDb: ${ratings.error}` : "No ratings found for this title on OMDb."}
+              </span>
+            )}
+          </>
+        )}
+        {!hasOmdbKey() && <span className="muted small">Add an OMDb key in Settings to see IMDb/RT ratings.</span>}
+      </div>
+
+      <p className="overview">
+        {details.overview || (ratings !== "loading" && ratings?.plot) || "No summary available."}
+      </p>
+
+      {inLibrary ? (
+        <>
+          <p className="status-ok">
+            {added ? `Added to your ${kind === "show" ? "Shows" : "Movies"}.` : `Already in your ${kind === "show" ? "Shows" : "Movies"}.`}
+          </p>
+          {!removeConfirming ? (
+            <button className="danger-button" onClick={() => setRemoveConfirming(true)}>
+              Remove from {kind === "show" ? "Shows" : "Movies"}
+            </button>
+          ) : (
+            <div className="field-row">
+              <span className="muted small">
+                Also deletes {kind === "show" ? "its watch history" : "its watched status"}. No undo.
+              </span>
+              <button className="danger-button" onClick={handleRemove}>
+                Confirm remove
+              </button>
+              <button onClick={() => setRemoveConfirming(false)}>Cancel</button>
+            </div>
+          )}
+        </>
+      ) : (
+        <button onClick={handleAdd}>{kind === "show" ? "Add to Shows" : "Add to Movies"}</button>
+      )}
+    </>
+  );
+
+  const seasonBrowserBlock = showsSeasonBrowser && (
+    <div className="season-browser">
+      {!inLibrary && (
+        <p className="muted small" style={{ marginBottom: 10 }}>
+          Previewing seasons and episodes. Add this show to your Shows to start tracking what you've watched.
+        </p>
+      )}
+      {catchUpOffer && (
+        <div className="catch-up-offer">
+          <span>
+            {catchUpOffer.kind === "episodes"
+              ? `Also mark the ${catchUpOffer.count} episode${catchUpOffer.count === 1 ? "" : "s"} before this one (in this season) as watched?`
+              : `Also mark all ${catchUpOffer.seasonNumbers.length} earlier season${catchUpOffer.seasonNumbers.length === 1 ? "" : "s"} as fully watched?`}
+          </span>
+          <div className="field-row">
+            <button onClick={acceptCatchUp}>Yes, catch up</button>
+            <button onClick={() => setCatchUpOffer(null)}>No, just this one</button>
+          </div>
+        </div>
+      )}
+      {seasonNumbers!.map((seasonNumber) => {
+        const isExpanded = expandedSeason === seasonNumber;
+        const eps = episodesBySeason.get(seasonNumber) ?? [];
+        const watchedCount = eps.filter((e) => watchedKeys.has(e.key)).length;
+        const allWatched = eps.length > 0 && watchedCount === eps.length;
+
+        return (
+          <div key={seasonNumber} className="season-block">
+            <div className="season-header season-toggle" onClick={() => toggleExpand(seasonNumber)}>
+              <h3>
+                <span className={`season-caret ${isExpanded ? "open" : ""}`}>&#9656;</span> Season{" "}
+                {seasonNumber}
+              </h3>
+              <div className="season-header-right">
+                {inLibrary && eps.length > 0 && (
+                  <span className="muted small">
+                    {watchedCount}/{eps.length}
+                  </span>
+                )}
+                {inLibrary && isExpanded && eps.length > 0 && (
+                  <button
+                    className="link-button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleSeasonWatched(eps, !allWatched);
+                    }}
+                  >
+                    {allWatched ? "Mark unwatched" : "Mark watched"}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {isExpanded && (
+              <>
+                {loadingSeason === seasonNumber && <p className="muted small">Fetching episodes...</p>}
+                <ul className="episode-list">
+                  {eps.map((ep) => (
+                    <li key={ep.key} className={`episode-row ${watchedKeys.has(ep.key) ? "watched" : ""}`}>
+                      {ep.stillPath ? (
+                        <img
+                          src={`${TMDB_IMAGE_BASE}${ep.stillPath}`}
+                          alt=""
+                          className="episode-thumb"
+                          onClick={() => setOpenEpisode(ep)}
+                        />
+                      ) : (
+                        <div className="episode-thumb poster-placeholder" onClick={() => setOpenEpisode(ep)} />
+                      )}
+                      <div className="episode-row-body" onClick={() => setOpenEpisode(ep)}>
+                        <span className="ep-number">
+                          S{ep.seasonNumber} | E{ep.episodeNumber}
+                        </span>
+                        <span className="ep-name">{ep.name}</span>
+                      </div>
+                      {inLibrary && (
+                        <button
+                          className={`watch-toggle ${watchedKeys.has(ep.key) ? "on" : ""}`}
+                          onClick={() => toggleEpisodeWatched(ep)}
+                          aria-label={watchedKeys.has(ep.key) ? "Mark unwatched" : "Mark watched"}
+                        >
+                          &#10003;
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  const episodeDetailsModal = openEpisode && details && (
+    <EpisodeDetailsPanel
+      show={{ name: details.name, imdbId: details.imdbId }}
+      episode={openEpisode}
+      watched={watchedKeys.has(openEpisode.key)}
+      canToggleWatched={inLibrary}
+      onToggleWatched={async () => {
+        await toggleEpisodeWatched(openEpisode);
+        setOpenEpisode(null);
+      }}
+      onClose={() => setOpenEpisode(null)}
+    />
+  );
+
+  if (isMobile) {
+    return (
+      <div className="modal-backdrop" onClick={onClose}>
+        <div
+          className={`details-sheet ${showsSeasonBrowser ? "details-modal-wide" : ""}`}
+          style={sheetStyle}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="sheet-drag-handle" {...handleProps}>
+            <div className="sheet-drag-handle-bar" />
+          </div>
+
+          <button className="close-x" onClick={onClose} aria-label="Close">
+            &times;
+          </button>
+
+          <div className="sheet-scroll-area">
+            {error && <p className="status-error">{error}</p>}
+            {!details && !error && <p className="muted">Loading...</p>}
+
+            {details && (
+              <>
+                <div className="details-hero">
+                  {details.posterPath && (
+                    <div
+                      className="details-hero-bg"
+                      style={{ backgroundImage: `url(${TMDB_IMAGE_BASE}${details.posterPath})` }}
+                    />
+                  )}
+                  <div className="details-hero-scrim" />
+                  {details.posterPath ? (
+                    <img
+                      src={`${TMDB_IMAGE_BASE}${details.posterPath}`}
+                      alt={details.name}
+                      className="details-hero-poster"
+                    />
+                  ) : (
+                    <div className="poster-placeholder details-hero-poster" />
+                  )}
+                  <h2 className="details-hero-title">{details.name}</h2>
+                </div>
+
+                <p className="muted small details-meta-line">
+                  <MetaLine details={details} />
+                </p>
+
+                <div className="details-body">{bodyContent}</div>
+
+                {seasonBrowserBlock}
+              </>
+            )}
+          </div>
+        </div>
+
+        {episodeDetailsModal}
+      </div>
+    );
+  }
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className={`modal details-modal ${showsSeasonBrowser ? "details-modal-wide" : ""}`} onClick={(e) => e.stopPropagation()}>
@@ -287,182 +522,18 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
               <div className="details-body">
                 <h2>{details.name}</h2>
                 <p className="muted small">
-                  {details.releaseDate ? details.releaseDate.slice(0, 4) : "Release date unknown"}
-                  {details.genres.length > 0 ? ` \u00b7 ${details.genres.join(", ")}` : ""}
-                  {details.numberOfSeasons
-                    ? ` \u00b7 ${details.numberOfSeasons} season${details.numberOfSeasons === 1 ? "" : "s"}`
-                    : ""}
-                  {details.status ? ` \u00b7 ${details.status}` : ""}
+                  <MetaLine details={details} />
                 </p>
-
-                <div className="ratings-row">
-                  {ratings === "loading" && hasOmdbKey() && <span className="muted small">Loading ratings...</span>}
-                  {ratings && ratings !== "loading" && (
-                    <>
-                      {ratings.imdbRating && <span className="rating-pill">IMDb {ratings.imdbRating}</span>}
-                      {ratings.rottenTomatoes && <span className="rating-pill">RT {ratings.rottenTomatoes}</span>}
-                      {!ratings.imdbRating && !ratings.rottenTomatoes && (
-                        <span className="muted small">
-                          {ratings.error ? `OMDb: ${ratings.error}` : "No ratings found for this title on OMDb."}
-                        </span>
-                      )}
-                    </>
-                  )}
-                  {!hasOmdbKey() && (
-                    <span className="muted small">Add an OMDb key in Settings to see IMDb/RT ratings.</span>
-                  )}
-                </div>
-
-                <p className="overview">
-                  {details.overview || (ratings !== "loading" && ratings?.plot) || "No summary available."}
-                </p>
-
-                {inLibrary ? (
-                  <>
-                    <p className="status-ok">
-                      {added ? `Added to your ${kind === "show" ? "Shows" : "Movies"}.` : `Already in your ${kind === "show" ? "Shows" : "Movies"}.`}
-                    </p>
-                    {!removeConfirming ? (
-                      <button className="danger-button" onClick={() => setRemoveConfirming(true)}>
-                        Remove from {kind === "show" ? "Shows" : "Movies"}
-                      </button>
-                    ) : (
-                      <div className="field-row">
-                        <span className="muted small">
-                          Also deletes {kind === "show" ? "its watch history" : "its watched status"}. No undo.
-                        </span>
-                        <button className="danger-button" onClick={handleRemove}>
-                          Confirm remove
-                        </button>
-                        <button onClick={() => setRemoveConfirming(false)}>Cancel</button>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <button onClick={handleAdd}>{kind === "show" ? "Add to Shows" : "Add to Movies"}</button>
-                )}
+                {bodyContent}
               </div>
             </div>
 
-            {showsSeasonBrowser && (
-              <div className="season-browser">
-                {!inLibrary && (
-                  <p className="muted small" style={{ marginBottom: 10 }}>
-                    Previewing seasons and episodes. Add this show to your Shows to start tracking what you've watched.
-                  </p>
-                )}
-                {catchUpOffer && (
-                  <div className="catch-up-offer">
-                    <span>
-                      {catchUpOffer.kind === "episodes"
-                        ? `Also mark the ${catchUpOffer.count} episode${catchUpOffer.count === 1 ? "" : "s"} before this one (in this season) as watched?`
-                        : `Also mark all ${catchUpOffer.seasonNumbers.length} earlier season${catchUpOffer.seasonNumbers.length === 1 ? "" : "s"} as fully watched?`}
-                    </span>
-                    <div className="field-row">
-                      <button onClick={acceptCatchUp}>Yes, catch up</button>
-                      <button onClick={() => setCatchUpOffer(null)}>No, just this one</button>
-                    </div>
-                  </div>
-                )}
-                {seasonNumbers!.map((seasonNumber) => {
-                  const isExpanded = expandedSeason === seasonNumber;
-                  const eps = episodesBySeason.get(seasonNumber) ?? [];
-                  const watchedCount = eps.filter((e) => watchedKeys.has(e.key)).length;
-                  const allWatched = eps.length > 0 && watchedCount === eps.length;
-
-                  return (
-                    <div key={seasonNumber} className="season-block">
-                      <div className="season-header season-toggle" onClick={() => toggleExpand(seasonNumber)}>
-                        <h3>
-                          <span className={`season-caret ${isExpanded ? "open" : ""}`}>&#9656;</span> Season{" "}
-                          {seasonNumber}
-                        </h3>
-                        <div className="season-header-right">
-                          {inLibrary && eps.length > 0 && (
-                            <span className="muted small">
-                              {watchedCount}/{eps.length}
-                            </span>
-                          )}
-                          {inLibrary && isExpanded && eps.length > 0 && (
-                            <button
-                              className="link-button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleSeasonWatched(eps, !allWatched);
-                              }}
-                            >
-                              {allWatched ? "Mark unwatched" : "Mark watched"}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {isExpanded && (
-                        <>
-                          {loadingSeason === seasonNumber && <p className="muted small">Fetching episodes...</p>}
-                          <ul className="episode-list">
-                            {eps.map((ep) => (
-                              <li
-                                key={ep.key}
-                                className={`episode-row ${watchedKeys.has(ep.key) ? "watched" : ""}`}
-                              >
-                                {ep.stillPath ? (
-                                  <img
-                                    src={`${TMDB_IMAGE_BASE}${ep.stillPath}`}
-                                    alt=""
-                                    className="episode-thumb"
-                                    onClick={() => setOpenEpisode(ep)}
-                                  />
-                                ) : (
-                                  <div className="episode-thumb poster-placeholder" onClick={() => setOpenEpisode(ep)} />
-                                )}
-                                <div className="episode-row-body" onClick={() => setOpenEpisode(ep)}>
-                                  <span className="ep-number">
-                                    S{ep.seasonNumber} | E{ep.episodeNumber}
-                                  </span>
-                                  <span className="ep-name">{ep.name}</span>
-                                </div>
-                                {/* Explicit, separate button, not sharing a <label> with the
-                                    clickable row above, that's what caused viewing details to
-                                    also silently toggle watched state before. Hidden entirely
-                                    (not just disabled) when the show isn't in your library yet,
-                                    since there's nothing meaningful to toggle. */}
-                                {inLibrary && (
-                                  <button
-                                    className={`watch-toggle ${watchedKeys.has(ep.key) ? "on" : ""}`}
-                                    onClick={() => toggleEpisodeWatched(ep)}
-                                    aria-label={watchedKeys.has(ep.key) ? "Mark unwatched" : "Mark watched"}
-                                  >
-                                    &#10003;
-                                  </button>
-                                )}
-                              </li>
-                            ))}
-                          </ul>
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            {seasonBrowserBlock}
           </>
         )}
       </div>
 
-      {openEpisode && details && (
-        <EpisodeDetailsPanel
-          show={{ name: details.name, imdbId: details.imdbId }}
-          episode={openEpisode}
-          watched={watchedKeys.has(openEpisode.key)}
-          canToggleWatched={inLibrary}
-          onToggleWatched={async () => {
-            await toggleEpisodeWatched(openEpisode);
-            setOpenEpisode(null);
-          }}
-          onClose={() => setOpenEpisode(null)}
-        />
-      )}
+      {episodeDetailsModal}
     </div>
   );
 }
