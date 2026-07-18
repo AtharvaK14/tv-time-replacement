@@ -53,7 +53,7 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
   // mobile-specific. useDraggableSheet's output is only wired into the
   // JSX on the mobile render path below, it's inert otherwise.
   useLockBodyScroll();
-  const { sheetStyle, handleProps } = useDraggableSheet();
+  const { sheetStyle, handleProps } = useDraggableSheet(onClose);
   const isMobile = useIsMobile();
 
   const [details, setDetails] = useState<CoreDetails | null>(null);
