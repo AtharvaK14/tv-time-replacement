@@ -297,6 +297,7 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
         wantsToWatch: true,
         runtimeMinutes: details.runtimeMinutes ?? null,
         imdbId: details.imdbId ?? null,
+        addedAt: new Date().toISOString(),
       });
     }
     setInLibrary(true);

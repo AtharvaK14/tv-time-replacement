@@ -672,7 +672,7 @@ hr { border: none; border-top: 1px solid var(--border); }
 
 @media (max-width: 640px) {
   .filters-row input[type="text"] {
-    flex: 1 1 auto; /* search gets its own full-width row */
+    flex: 1 1 auto; /* shares the row with the Filters trigger, instead of forcing its own full-width row */
     min-width: 0;
   }
 

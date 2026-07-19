@@ -9,7 +9,7 @@ import SegmentedControl from "../components/SegmentedControl";
 import GenreChips from "../components/GenreChips";
 import { useIsMobile } from "../lib/useIsMobile";
 
-type SortKey = "title" | "releaseYear" | "recentlyWatched" | "rating";
+type SortKey = "title" | "releaseYear" | "recentlyWatched" | "recentlyAdded" | "rating";
 type FilterKey = "all" | "watched" | "wantToWatch";
 
 const STATUS_OPTIONS: { value: FilterKey; label: string }[] = [
@@ -22,6 +22,7 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: "title", label: "Title (A-Z)" },
   { value: "releaseYear", label: "Release year" },
   { value: "recentlyWatched", label: "Recently watched" },
+  { value: "recentlyAdded", label: "Recently added" },
 ];
 
 export default function Movies({
@@ -81,6 +82,13 @@ export default function Movies({
         break;
       case "recentlyWatched":
         sorted.sort((a, b) => (b.watchedAt ?? "").localeCompare(a.watchedAt ?? ""));
+        break;
+      case "recentlyAdded":
+        // Movies added before this field existed have no addedAt at all
+        // (not backfilled, there's no true original add date to recover),
+        // "" sorts before any real ISO timestamp, so they correctly land
+        // at the end rather than the front.
+        sorted.sort((a, b) => (b.addedAt ?? "").localeCompare(a.addedAt ?? ""));
         break;
       case "rating":
         // No per-title rating cached locally (ratings come from OMDb live,

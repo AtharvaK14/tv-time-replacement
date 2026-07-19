@@ -70,6 +70,12 @@ export interface Movie {
   // month" on Home. Undefined for movies added before this field existed,
   // until backfilled.
   releaseDate?: string | null;
+  // ISO timestamp of when this movie was added to the library. Optional
+  // because, unlike Show.addedAt (present since v1), this field was added
+  // later, existing movies have no true original add date to recover, so
+  // they're left undefined rather than backfilled with a fabricated
+  // value. The "Recently added" sort treats undefined as oldest.
+  addedAt?: string;
 }
 
 // Remembers how a raw TV Time title string was resolved, so re-running an
@@ -206,6 +212,15 @@ class TrackerDB extends Dexie {
     // cleared. Existing rows get undefined until the stats.ts backfill (or
     // a re-add/re-import) populates them.
     this.version(8).stores({
+      shows: "tmdbId, name, isFollowed, lastWatchedAt, tvdbId",
+      episodes: "key, showId, [showId+seasonNumber]",
+      watchedEpisodes: "key, showId, watchedAt",
+      movies: "tmdbId, title, watched, wantsToWatch",
+      titleMatches: "rawTitle, kind",
+      settings: "key",
+    });
+    // v9: added Movie.addedAt. Purely additive, same pattern as v8.
+    this.version(9).stores({
       shows: "tmdbId, name, isFollowed, lastWatchedAt, tvdbId",
       episodes: "key, showId, [showId+seasonNumber]",
       watchedEpisodes: "key, showId, watchedAt",

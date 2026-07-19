@@ -193,6 +193,7 @@ export async function runImport(
         rewatchCount: rewatchCounts.get(rawTitle) ?? 0,
         genreIds: details.genres.map((g) => g.id),
         imdbId: details.external_ids?.imdb_id ?? null,
+        addedAt: new Date().toISOString(),
       };
       await db.movies.put(movie);
       result.moviesMatched++;

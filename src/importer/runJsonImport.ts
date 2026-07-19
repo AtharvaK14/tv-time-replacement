@@ -166,6 +166,7 @@ export async function runJsonImport(
         rewatchCount: movie.rewatch_count,
         genreIds: details.genres.map((g) => g.id),
         imdbId: details.external_ids?.imdb_id ?? movie.id.imdb ?? null,
+        addedAt: new Date().toISOString(),
       };
       await db.movies.put(movieRecord);
       result.moviesMatched++;
