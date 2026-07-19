@@ -36,11 +36,27 @@ async function tmdbGet<T>(path: string, params: Record<string, string> = {}): Pr
   return res.json() as Promise<T>;
 }
 
+// Distinguishes "TMDB said no" from "couldn't reach TMDB" so the first-run
+// wizard and Settings can show an actionable message instead of a generic
+// failure (a user with a typo'd key needs different advice than a user on
+// a dead connection).
+export type KeyCheckResult = "valid" | "invalid" | "network-error";
+
+export async function checkTmdbKey(key: string): Promise<KeyCheckResult> {
+  try {
+    const url = new URL(TMDB_BASE + "/authentication");
+    url.searchParams.set("api_key", key);
+    const res = await fetch(url.toString());
+    if (res.ok) return "valid";
+    if (res.status >= 500) return "network-error"; // TMDB itself is having trouble
+    return "invalid"; // 401 for a bad key; any other 4xx is still key-side
+  } catch {
+    return "network-error"; // offline, DNS failure, etc.
+  }
+}
+
 export async function verifyApiKey(key: string): Promise<boolean> {
-  const url = new URL(TMDB_BASE + "/authentication");
-  url.searchParams.set("api_key", key);
-  const res = await fetch(url.toString());
-  return res.ok;
+  return (await checkTmdbKey(key)) === "valid";
 }
 
 // ---- Search ---------------------------------------------------------------

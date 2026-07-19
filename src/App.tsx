@@ -7,6 +7,8 @@ import Movies from "./pages/Movies";
 import AddTitle from "./pages/AddTitle";
 import Settings from "./pages/Settings";
 import BackupNudge from "./components/BackupNudge";
+import FirstRunWizard from "./components/FirstRunWizard";
+import { hasApiKey } from "./tmdb";
 import {
   initStoragePersistence,
   shouldShowBackupNudge,
@@ -44,6 +46,14 @@ function App() {
   // Phase 0 durability: ask the browser/WebView for persistent storage once
   // per launch, and re-evaluate the backup nudge whenever a backup or
   // restore completes (the banner should clear immediately, not on reload).
+  // First-run onboarding: shown only when the user has never completed or
+  // skipped it AND there's no TMDB key. The hasApiKey() check grandfathers
+  // in existing installs from before the wizard existed — they configured
+  // keys through Settings and must never see onboarding.
+  const [showOnboarding, setShowOnboarding] = useState(
+    () => localStorage.getItem("onboarding_completed") !== "true" && !hasApiKey()
+  );
+
   const [persistStatus, setPersistStatus] = useState<PersistStatus | null>(null);
   const [, forceNudgeRecheck] = useState(0);
 
@@ -77,6 +87,8 @@ function App() {
 
   return (
     <>
+      {showOnboarding && <FirstRunWizard onComplete={() => setShowOnboarding(false)} />}
+
       <nav className="side-rail">
         <span className="side-rail-mark" aria-hidden="true">R</span>
         {TAB_ORDER.map((t) => {

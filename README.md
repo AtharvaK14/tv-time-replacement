@@ -148,28 +148,38 @@ which also cuts down on unnecessary API calls for shows you don't revisit.
 ```
 src/
   db.ts                       Dexie schema (IndexedDB), source of truth
-  tmdb.ts                     TMDB API client
-  omdb.ts                     OMDb API client (IMDb/RT ratings)
+  tmdb.ts                     TMDB API client + key check
+  omdb.ts                     OMDb API client (IMDb/RT ratings) + key check
+  tvmaze.ts                   TVmaze client (per-episode runtimes, no key needed)
   lib/
-    episodeSync.ts            Shared TMDB episode-list caching (Home + ShowDetail)
+    episodeSync.ts            Shared TMDB episode-list caching
     showStatus.ts             Recency helpers, staleness threshold
+    persistence.ts            navigator.storage.persist + backup-nudge logic
+    backup.ts                 Full-database export/validate/restore (format v1)
   importer/
     parseTvTimeCsv.ts         CSV parsing, verified against real export schema
+    parseTvTimeJson.ts        Third-party JSON export parsing (exact IDs)
     matcher.ts                Title -> TMDB ID resolution + caching
-    runImport.ts              Orchestrates parse -> match -> write
+    runImport.ts              CSV import: parse -> match -> write
+    runJsonImport.ts          JSON import: ID-based matching
   components/
-    DetailsPanel.tsx          Plot/ratings/add-to-library modal
+    DetailsPanel.tsx          Plot/ratings/add-to-library modal + season browser
+    FirstRunWizard.tsx        First-launch API key onboarding
+    BackupNudge.tsx           Dismissible "back up your library" banner
   pages/
     Home.tsx                  Watch Next + Haven't Watched For a While
     Library.tsx               Shows grid (renamed "Shows" in nav)
-    ShowDetail.tsx             Season/episode checklist
     Movies.tsx                Movie list with watched toggle
-    AddTitle.tsx               Search TMDB, opens DetailsPanel to add
-    ImportWizard.tsx            TV Time CSV import with disambiguation UI
-    Settings.tsx                TMDB + OMDb API keys
-    Stats.tsx                   Time-watched totals, self-healing runtime backfill
-    Diagnostics.tsx              Stored-data vs TMDB comparison for bug reports
+    AddTitle.tsx              Search TMDB, opens DetailsPanel to add
+    ImportWizard.tsx          TV Time import with disambiguation UI
+    Settings.tsx              Backup/restore, import, API keys, diagnostics
+    Stats.tsx                 Time-watched totals, self-healing runtime backfill
+    Diagnostics.tsx           Stored-data vs TMDB comparison for bug reports
 ```
+
+(ShowDetail.tsx was removed: it had been superseded by DetailsPanel's season
+browser, was no longer imported anywhere, and had stopped compiling after
+the v5 schema change, which was silently breaking `npm run build`.)
 
 ## This round: UI additions, a real CSS bug fix, and one bug still needs your diagnostic run
 

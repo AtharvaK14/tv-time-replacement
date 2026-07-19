@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { verifyApiKey, TMDB_API_KEY_STORAGE } from "../tmdb";
-import { verifyOmdbKey, OMDB_API_KEY_STORAGE } from "../omdb";
+import { checkTmdbKey, TMDB_API_KEY_STORAGE } from "../tmdb";
+import { checkOmdbKey, OMDB_API_KEY_STORAGE } from "../omdb";
 import { db } from "../db";
 import {
   exportAndDownloadBackup,
@@ -24,12 +24,30 @@ import Diagnostics from "./Diagnostics";
 
 type KeyStatus = "idle" | "checking" | "valid" | "invalid";
 
+// Same specific messaging as the first-run wizard (Settings parity): a
+// wrong key, an unactivated key, and an unreachable service each need
+// different advice.
+const TMDB_SETTINGS_ERRORS: Record<string, string> = {
+  invalid:
+    'TMDB rejected this key. Paste the "API Key" (v3 auth) from your TMDB settings page, not the longer read access token.',
+  "network-error": "Couldn't reach TMDB. Check your connection, or try again in a minute if TMDB itself is down.",
+};
+
+const OMDB_SETTINGS_ERRORS: Record<string, string> = {
+  invalid:
+    "OMDb rejected this key. If you just created it, click the activation link in the email OMDb sent you first.",
+  "network-error": "Couldn't reach OMDb. Check your connection, or try again in a minute.",
+};
+
 function ApiKeys() {
   const [tmdbKey, setTmdbKey] = useState("");
   const [tmdbStatus, setTmdbStatus] = useState<KeyStatus>("idle");
+  const [tmdbError, setTmdbError] = useState<string | null>(null);
   const [tmdbVisible, setTmdbVisible] = useState(false);
   const [omdbKey, setOmdbKey] = useState("");
   const [omdbStatus, setOmdbStatus] = useState<KeyStatus>("idle");
+  const [omdbError, setOmdbError] = useState<string | null>(null);
+  const [omdbNote, setOmdbNote] = useState<string | null>(null);
   const [omdbVisible, setOmdbVisible] = useState(false);
 
   useEffect(() => {
@@ -51,23 +69,33 @@ function ApiKeys() {
 
   async function saveTmdb() {
     setTmdbStatus("checking");
-    const ok = await verifyApiKey(tmdbKey.trim());
-    if (ok) {
+    setTmdbError(null);
+    const result = await checkTmdbKey(tmdbKey.trim());
+    if (result === "valid") {
       localStorage.setItem(TMDB_API_KEY_STORAGE, tmdbKey.trim());
       setTmdbStatus("valid");
     } else {
       setTmdbStatus("invalid");
+      setTmdbError(TMDB_SETTINGS_ERRORS[result]);
     }
   }
 
   async function saveOmdb() {
     setOmdbStatus("checking");
-    const ok = await verifyOmdbKey(omdbKey.trim());
-    if (ok) {
+    setOmdbError(null);
+    setOmdbNote(null);
+    const result = await checkOmdbKey(omdbKey.trim());
+    if (result === "valid" || result === "rate-limited") {
+      // rate-limited proves the key is real (OMDb recognized it and counted
+      // it against a quota), so save it rather than bouncing the user.
       localStorage.setItem(OMDB_API_KEY_STORAGE, omdbKey.trim());
       setOmdbStatus("valid");
+      if (result === "rate-limited") {
+        setOmdbNote("Key saved. It already hit its 1,000-requests-per-day limit today, so ratings resume tomorrow.");
+      }
     } else {
       setOmdbStatus("invalid");
+      setOmdbError(OMDB_SETTINGS_ERRORS[result]);
     }
   }
 
@@ -98,7 +126,7 @@ function ApiKeys() {
           </button>
         </div>
         {tmdbStatus === "valid" && <p className="status-ok">Key verified and saved.</p>}
-        {tmdbStatus === "invalid" && <p className="status-error">TMDB rejected this key.</p>}
+        {tmdbStatus === "invalid" && tmdbError && <p className="status-error">{tmdbError}</p>}
       </div>
 
       <div className="settings-block">
@@ -127,8 +155,8 @@ function ApiKeys() {
             {omdbStatus === "checking" ? "Checking..." : "Save"}
           </button>
         </div>
-        {omdbStatus === "valid" && <p className="status-ok">Key verified and saved.</p>}
-        {omdbStatus === "invalid" && <p className="status-error">OMDb rejected this key.</p>}
+        {omdbStatus === "valid" && <p className="status-ok">{omdbNote ?? "Key verified and saved."}</p>}
+        {omdbStatus === "invalid" && omdbError && <p className="status-error">{omdbError}</p>}
       </div>
 
       <hr />
