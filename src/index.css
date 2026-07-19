@@ -724,3 +724,61 @@ hr { border: none; border-top: 1px solid var(--border); }
 .danger-button:hover {
   transform: translateY(-1px);
 }
+
+/* ============================================================
+   Themed scrollbars, matching the app's existing dark palette
+   instead of the browser default. Global (applies everywhere
+   there's a scrollbar, not just the details panel), since an
+   unstyled scrollbar next to styled ones anywhere else would
+   just move the "doesn't match the UI" problem rather than fix
+   it. Purely visual, no layout/behavior change.
+   ============================================================ */
+
+:root {
+  /* Firefox: standardized two-value property, no pseudo-elements needed. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* Chrome / Edge / Safari. Left unqualified (not scoped to a selector) so
+   it applies to every scrollable element's scrollbar by default, that's
+   standard WebKit behavior, not an oversight. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+  border-radius: 999px;
+  border: 2px solid transparent; /* combined with background-clip below, gives
+                                     the thumb a little breathing room from
+                                     the track edges instead of touching it */
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--muted);
+}
+
+/* ============================================================
+   Mobile-only: remove the nested 50vh scroll cap on the season
+   browser. On desktop this is unchanged and still correct, it's
+   the only nested scroller inside the modal, no conflict there.
+   On mobile it was fighting with .sheet-scroll-area, two
+   independently scrollable regions stacked inside each other,
+   which is why scrolling the episode list stopped partway and
+   needed a second, separate scroll gesture outside it to
+   continue. Letting it flow into the single outer scroll removes
+   the conflict entirely rather than trying to make two nested
+   touch-scrollers hand off to each other cleanly.
+   ============================================================ */
+
+@media (max-width: 640px) {
+  .season-browser {
+    max-height: none;
+    overflow-y: visible;
+    overscroll-behavior: auto;
+  }
+}
