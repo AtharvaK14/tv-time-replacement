@@ -23,6 +23,14 @@ export default function EpisodeDetailsPanel({ show, episode, watched, canToggleW
   const [rating, setRating] = useState<OmdbEpisodeRating | null | "loading">("loading");
 
   useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  useEffect(() => {
     let cancelled = false;
     async function load() {
       if (!hasOmdbKey()) {

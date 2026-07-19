@@ -3,7 +3,7 @@ import { db, type Episode } from "../db";
 import { getTvShowDetails, getMovieDetails, TMDB_IMAGE_BASE, TMDB_BACKDROP_BASE } from "../tmdb";
 import { getOmdbRatings, hasOmdbKey, type OmdbRatings } from "../omdb";
 import { averageRuntime } from "../lib/runtime";
-import { getSeasonNumbers, ensureSeasonCached } from "../lib/episodeSync";
+import { getSeasonNumbers, ensureSeasonCached, totalEpisodeCount } from "../lib/episodeSync";
 import { useDraggableSheet } from "../lib/useDraggableSheet";
 import { useLockBodyScroll } from "../lib/useLockBodyScroll";
 import { useIsMobile } from "../lib/useIsMobile";
@@ -23,6 +23,7 @@ interface CoreDetails {
   overview: string | null;
   status?: string; // shows only
   numberOfSeasons?: number; // shows only
+  numberOfEpisodes?: number; // shows only, sum of episode_count across real seasons
   episodeRuntimeMinutes?: number | null; // shows only
   runtimeMinutes?: number | null; // movies only
   imdbId?: string | null;
@@ -71,6 +72,18 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
   const [watchedKeys, setWatchedKeys] = useState<Set<string>>(new Set());
   const [openEpisode, setOpenEpisode] = useState<Episode | null>(null);
 
+  // Escape closes this panel, unless the episode panel is stacked on top
+  // of it (openEpisode set), in which case that panel's own Escape
+  // handler (added alongside it in EpisodeDetailsPanel.tsx) should close
+  // just that top layer first, not both at once.
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && !openEpisode) onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, openEpisode]);
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -86,6 +99,7 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
             overview: d.overview,
             status: d.status,
             numberOfSeasons: d.number_of_seasons,
+            numberOfEpisodes: totalEpisodeCount(d.seasons),
             episodeRuntimeMinutes: averageRuntime(d.episode_run_time),
             imdbId: d.external_ids?.imdb_id ?? null,
             genres: d.genres.map((g) => g.name),
@@ -167,11 +181,9 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
     }
   }
 
-  const [catchUpOffer, setCatchUpOffer] = useState<
-    | { kind: "episodes"; episodes: Episode[]; count: number }
-    | { kind: "seasons"; seasonNumbers: number[] }
-    | null
-  >(null);
+  const [catchUpOffer, setCatchUpOffer] = useState<{ episodesInSeason: Episode[]; earlierSeasonNumbers: number[] } | null>(
+    null
+  );
 
   async function markEpisodesWatched(eps: Episode[]) {
     await db.watchedEpisodes.bulkPut(
@@ -187,18 +199,44 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
     await refreshWatchedAndEpisodes();
   }
 
+  /**
+   * Which season numbers strictly before `beforeSeason` still need
+   * catching up. A season already fully watched (verifiable because it's
+   * cached) is excluded, so accepting an already-caught-up show doesn't
+   * nag about seasons you've already marked. A season that's never been
+   * opened/cached at all is included rather than skipped: we can't verify
+   * it's already watched, and the common real case (per the exact
+   * scenario this was reported against) is jumping straight to marking an
+   * episode deep in the series without ever having opened Season 1, so
+   * silently excluding uncached seasons would recreate the original bug.
+   */
+  function earlierSeasonsNeedingCatchUp(beforeSeason: number): number[] {
+    return (seasonNumbers ?? []).filter((n) => {
+      if (n >= beforeSeason) return false;
+      const eps = episodesBySeason.get(n);
+      if (!eps || eps.length === 0) return true;
+      return eps.some((e) => !watchedKeys.has(e.key));
+    });
+  }
+
   async function toggleEpisodeWatched(ep: Episode) {
     if (!inLibrary) return;
     if (watchedKeys.has(ep.key)) {
       await db.watchedEpisodes.delete(ep.key);
+      await refreshWatchedAndEpisodes();
       setCatchUpOffer(null);
       return;
     }
     await markEpisodesWatched([ep]);
 
     const seasonEps = episodesBySeason.get(ep.seasonNumber) ?? [];
-    const earlierUnwatched = seasonEps.filter((e) => e.episodeNumber < ep.episodeNumber && !watchedKeys.has(e.key));
-    setCatchUpOffer(earlierUnwatched.length > 0 ? { kind: "episodes", episodes: earlierUnwatched, count: earlierUnwatched.length } : null);
+    const episodesInSeason = seasonEps.filter((e) => e.episodeNumber < ep.episodeNumber && !watchedKeys.has(e.key));
+    const earlierSeasonNumbers = earlierSeasonsNeedingCatchUp(ep.seasonNumber);
+    setCatchUpOffer(
+      episodesInSeason.length > 0 || earlierSeasonNumbers.length > 0
+        ? { episodesInSeason, earlierSeasonNumbers }
+        : null
+    );
   }
 
   async function toggleSeasonWatched(seasonEpisodes: Episode[], markWatched: boolean) {
@@ -206,27 +244,26 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
     if (markWatched) {
       await markEpisodesWatched(seasonEpisodes);
       const thisSeason = seasonEpisodes[0]?.seasonNumber;
-      const earlierSeasons = seasonNumbers?.filter((n) => n < thisSeason) ?? [];
-      setCatchUpOffer(earlierSeasons.length > 0 ? { kind: "seasons", seasonNumbers: earlierSeasons } : null);
+      const earlierSeasonNumbers = thisSeason === undefined ? [] : earlierSeasonsNeedingCatchUp(thisSeason);
+      setCatchUpOffer(earlierSeasonNumbers.length > 0 ? { episodesInSeason: [], earlierSeasonNumbers } : null);
     } else {
       await db.watchedEpisodes.bulkDelete(seasonEpisodes.map((ep) => ep.key));
+      await refreshWatchedAndEpisodes();
       setCatchUpOffer(null);
     }
   }
 
   async function acceptCatchUp() {
     if (!catchUpOffer) return;
-    if (catchUpOffer.kind === "episodes") {
-      await markEpisodesWatched(catchUpOffer.episodes);
-    } else {
-      for (const seasonNumber of catchUpOffer.seasonNumbers) {
-        await ensureSeasonCached(tmdbId, seasonNumber);
-      }
-      await refreshWatchedAndEpisodes();
-      const freshEpisodes = await db.episodes.where("showId").equals(tmdbId).toArray();
-      const toMark = freshEpisodes.filter((e) => catchUpOffer.seasonNumbers.includes(e.seasonNumber));
-      await markEpisodesWatched(toMark);
+    for (const seasonNumber of catchUpOffer.earlierSeasonNumbers) {
+      await ensureSeasonCached(tmdbId, seasonNumber);
     }
+    const freshEpisodes =
+      catchUpOffer.earlierSeasonNumbers.length > 0
+        ? await db.episodes.where("showId").equals(tmdbId).toArray()
+        : [];
+    const fromEarlierSeasons = freshEpisodes.filter((e) => catchUpOffer.earlierSeasonNumbers.includes(e.seasonNumber));
+    await markEpisodesWatched([...catchUpOffer.episodesInSeason, ...fromEarlierSeasons]);
     setCatchUpOffer(null);
   }
 
@@ -244,6 +281,7 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
         isArchived: false,
         lastWatchedAt: null,
         episodeRuntimeMinutes: details.episodeRuntimeMinutes ?? null,
+        numberOfEpisodes: details.numberOfEpisodes ?? null,
         imdbId: details.imdbId ?? null,
       });
       await refreshWatchedAndEpisodes();
@@ -253,11 +291,13 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
         title: details.name,
         posterPath: details.posterPath,
         releaseYear: details.releaseDate ? Number(details.releaseDate.slice(0, 4)) : null,
+        releaseDate: details.releaseDate ?? null,
         watched: false,
         watchedAt: null,
         wantsToWatch: true,
         runtimeMinutes: details.runtimeMinutes ?? null,
         imdbId: details.imdbId ?? null,
+        addedAt: new Date().toISOString(),
       });
     }
     setInLibrary(true);
@@ -362,9 +402,13 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
       {catchUpOffer && (
         <div className="catch-up-offer">
           <span>
-            {catchUpOffer.kind === "episodes"
-              ? `Also mark the ${catchUpOffer.count} episode${catchUpOffer.count === 1 ? "" : "s"} before this one (in this season) as watched?`
-              : `Also mark all ${catchUpOffer.seasonNumbers.length} earlier season${catchUpOffer.seasonNumbers.length === 1 ? "" : "s"} as fully watched?`}
+            Also mark{" "}
+            {catchUpOffer.episodesInSeason.length > 0 &&
+              `the ${catchUpOffer.episodesInSeason.length} episode${catchUpOffer.episodesInSeason.length === 1 ? "" : "s"} before this one in this season`}
+            {catchUpOffer.episodesInSeason.length > 0 && catchUpOffer.earlierSeasonNumbers.length > 0 && " and "}
+            {catchUpOffer.earlierSeasonNumbers.length > 0 &&
+              `${catchUpOffer.earlierSeasonNumbers.length} earlier season${catchUpOffer.earlierSeasonNumbers.length === 1 ? "" : "s"}`}
+            {" "}as watched?
           </span>
           <div className="field-row">
             <button onClick={acceptCatchUp}>Yes, catch up</button>
@@ -380,10 +424,24 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
 
         return (
           <div key={seasonNumber} className="season-block">
-            <div className="season-header season-toggle" onClick={() => toggleExpand(seasonNumber)}>
+            <div
+              className="season-header season-toggle"
+              role="button"
+              tabIndex={0}
+              aria-expanded={isExpanded}
+              onClick={() => toggleExpand(seasonNumber)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  toggleExpand(seasonNumber);
+                }
+              }}
+            >
               <h3>
-                <span className={`season-caret ${isExpanded ? "open" : ""}`}>&#9656;</span> Season{" "}
-                {seasonNumber}
+                <span className={`season-caret ${isExpanded ? "open" : ""}`} aria-hidden="true">
+                  &#9656;
+                </span>{" "}
+                Season {seasonNumber}
               </h3>
               <div className="season-header-right">
                 {inLibrary && eps.length > 0 && (
@@ -405,6 +463,12 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
               </div>
             </div>
 
+            {inLibrary && eps.length > 0 && (
+              <div className="season-progress">
+                <span style={{ width: `${(watchedCount / eps.length) * 100}%` }} />
+              </div>
+            )}
+
             {isExpanded && (
               <>
                 {loadingSeason === seasonNumber && <p className="muted small">Fetching episodes...</p>}
@@ -415,13 +479,29 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
                         <img
                           src={`${TMDB_IMAGE_BASE}${ep.stillPath}`}
                           alt=""
+                          aria-hidden="true"
                           className="episode-thumb"
                           onClick={() => setOpenEpisode(ep)}
                         />
                       ) : (
-                        <div className="episode-thumb poster-placeholder" onClick={() => setOpenEpisode(ep)} />
+                        <div
+                          className="episode-thumb poster-placeholder"
+                          aria-hidden="true"
+                          onClick={() => setOpenEpisode(ep)}
+                        />
                       )}
-                      <div className="episode-row-body" onClick={() => setOpenEpisode(ep)}>
+                      <div
+                        className="episode-row-body"
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setOpenEpisode(ep)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setOpenEpisode(ep);
+                          }
+                        }}
+                      >
                         <span className="ep-number">
                           S{ep.seasonNumber} | E{ep.episodeNumber}
                         </span>
@@ -569,12 +649,10 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
               </div>
             </div>
 
-            <div className="desktop-two-col">
-              <div className="desktop-overview-col">{overviewContent}</div>
-              <div className="desktop-sidebar-col">
-                {ratingsRowContent}
-                {addRemoveContent}
-              </div>
+            <div className="desktop-body">
+              {ratingsRowContent}
+              {addRemoveContent}
+              {overviewContent}
             </div>
 
             {seasonBrowserBlock}

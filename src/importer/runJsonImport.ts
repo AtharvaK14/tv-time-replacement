@@ -1,6 +1,7 @@
 import { db, episodeKey, type Show, type WatchedEpisode, type Movie } from "../db";
 import { getTvShowDetails, getMovieDetails } from "../tmdb";
 import { averageRuntime } from "../lib/runtime";
+import { totalEpisodeCount } from "../lib/episodeSync";
 import { parseMoviesJson, parseSeriesJson, type TvTimeShowExport } from "./parseTvTimeJson";
 import { resolveShowByIds, resolveMovieByIds, type ResolveAmbiguous } from "./matcher";
 
@@ -91,6 +92,7 @@ export async function runJsonImport(
           isArchived: show.status === "stopped",
           lastWatchedAt,
           episodeRuntimeMinutes: averageRuntime(details.episode_run_time),
+          numberOfEpisodes: totalEpisodeCount(details.seasons),
           genreIds: details.genres.map((g) => g.id),
           imdbId: details.external_ids?.imdb_id ?? show.id.imdb ?? null,
           tvTimeStatus: show.status,
@@ -156,6 +158,7 @@ export async function runJsonImport(
         title: details.title,
         posterPath: details.poster_path,
         releaseYear: details.release_date ? Number(details.release_date.slice(0, 4)) : null,
+        releaseDate: details.release_date,
         watched: movie.is_watched,
         watchedAt: movie.watched_at,
         wantsToWatch: !movie.is_watched,
@@ -163,6 +166,7 @@ export async function runJsonImport(
         rewatchCount: movie.rewatch_count,
         genreIds: details.genres.map((g) => g.id),
         imdbId: details.external_ids?.imdb_id ?? movie.id.imdb ?? null,
+        addedAt: new Date().toISOString(),
       };
       await db.movies.put(movieRecord);
       result.moviesMatched++;

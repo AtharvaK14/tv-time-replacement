@@ -1,6 +1,18 @@
 import { db, episodeKey, type Episode } from "../db";
-import { getTvShowDetails, getSeasonDetails } from "../tmdb";
+import { getTvShowDetails, getSeasonDetails, type TvShowDetails } from "../tmdb";
 import { getTvmazeRuntimesByTvdbId } from "../tvmaze";
+
+/**
+ * Sum of episode_count across real seasons (season_number > 0, excluding
+ * specials), matching the same filter already used everywhere else in this
+ * file for season numbers. Used to populate Show.numberOfEpisodes, which
+ * powers the watched/total progress bar on the Shows grid, added at every
+ * write site (DetailsPanel's handleAdd, both importers, and the stats.ts
+ * backfill) since existing shows predate this field.
+ */
+export function totalEpisodeCount(seasons: TvShowDetails["seasons"]): number {
+  return seasons.filter((s) => s.season_number > 0).reduce((sum, s) => sum + s.episode_count, 0);
+}
 
 // In-memory cache of TVmaze runtime lookups, keyed by tmdbId, for this
 // browser session only (not persisted, cheap to re-derive, and TVmaze data
@@ -123,4 +135,21 @@ export function countAdditionalUnwatched(episodes: Episode[], watchedKeys: Set<s
   const today = new Date().toISOString().slice(0, 10);
   const unwatchedAvailable = episodes.filter((ep) => isAvailableToWatch(ep.airDate, today) && !watchedKeys.has(ep.key));
   return Math.max(0, unwatchedAvailable.length - 1);
+}
+
+/**
+ * Nearest not-yet-aired episode, for Home's "Coming up" section. Mirror of
+ * isAvailableToWatch's future-date check, but deliberately NOT the mirror
+ * of its missing-date handling: isAvailableToWatch treats a missing
+ * air_date as available (correct for Watch Next, where absence of proof
+ * shouldn't hide something you might already be able to watch), but here
+ * that same missing-date case must NOT count as "upcoming", an unknown
+ * date is not a confirmed future one, and showing it under "coming up"
+ * would overclaim something TMDB hasn't actually told us.
+ */
+export function findNextUpcoming(episodes: Episode[], today = new Date().toISOString().slice(0, 10)): Episode | null {
+  const upcoming = episodes
+    .filter((ep) => ep.airDate && ep.airDate > today)
+    .sort((a, b) => (a.airDate as string).localeCompare(b.airDate as string));
+  return upcoming[0] ?? null;
 }

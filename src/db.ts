@@ -24,6 +24,11 @@ export interface Show {
   // reliable enough to build Watch Next on. Undefined for shows added before
   // this field existed, or added manually rather than imported.
   tvTimeStatus?: "not_started_yet" | "continuing" | "up_to_date" | "stopped" | "watch_later";
+  // Sum of episode_count across TMDB's seasons array (season_number > 0),
+  // computed once at add/import time or by the v8 backfill below. Powers
+  // the watched/total progress bar on the Shows grid. Undefined for shows
+  // added before this field existed, until backfilled.
+  numberOfEpisodes?: number | null;
 }
 
 export interface Episode {
@@ -61,6 +66,16 @@ export interface Movie {
   rewatchCount?: number; // additional watches beyond the first, from counted 'rewatch' events (verified more reliable than TV Time's own rewatch_count field)
   genreIds?: number[]; // TMDB genre IDs, for the genre filter
   imdbId?: string | null; // from TMDB's external_ids, used for accurate OMDb lookups instead of title matching
+  // Full release_date from TMDB, not just the year. Powers "releasing this
+  // month" on Home. Undefined for movies added before this field existed,
+  // until backfilled.
+  releaseDate?: string | null;
+  // ISO timestamp of when this movie was added to the library. Optional
+  // because, unlike Show.addedAt (present since v1), this field was added
+  // later, existing movies have no true original add date to recover, so
+  // they're left undefined rather than backfilled with a fabricated
+  // value. The "Recently added" sort treats undefined as oldest.
+  addedAt?: string;
 }
 
 // Remembers how a raw TV Time title string was resolved, so re-running an
@@ -192,6 +207,27 @@ class TrackerDB extends Dexie {
         settings: "key",
       })
       .upgrade((tx) => tx.table("episodes").clear());
+    // v8: added numberOfEpisodes (Show) and releaseDate (Movie). Same
+    // pattern as v4/v6: purely additive fields, no index changes, nothing
+    // cleared. Existing rows get undefined until the stats.ts backfill (or
+    // a re-add/re-import) populates them.
+    this.version(8).stores({
+      shows: "tmdbId, name, isFollowed, lastWatchedAt, tvdbId",
+      episodes: "key, showId, [showId+seasonNumber]",
+      watchedEpisodes: "key, showId, watchedAt",
+      movies: "tmdbId, title, watched, wantsToWatch",
+      titleMatches: "rawTitle, kind",
+      settings: "key",
+    });
+    // v9: added Movie.addedAt. Purely additive, same pattern as v8.
+    this.version(9).stores({
+      shows: "tmdbId, name, isFollowed, lastWatchedAt, tvdbId",
+      episodes: "key, showId, [showId+seasonNumber]",
+      watchedEpisodes: "key, showId, watchedAt",
+      movies: "tmdbId, title, watched, wantsToWatch",
+      titleMatches: "rawTitle, kind",
+      settings: "key",
+    });
   }
 }
 
