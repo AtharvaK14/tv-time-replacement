@@ -7,8 +7,12 @@ export const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w342";
 // without shipping a full 1280w/original image for that.
 export const TMDB_BACKDROP_BASE = "https://image.tmdb.org/t/p/w780";
 
+// Exported so Settings and the backup/restore code reference the same
+// storage key instead of re-typing the literal.
+export const TMDB_API_KEY_STORAGE = "tmdb_api_key";
+
 function getApiKey(): string {
-  const key = localStorage.getItem("tmdb_api_key");
+  const key = localStorage.getItem(TMDB_API_KEY_STORAGE);
   if (!key) {
     throw new Error("TMDB API key is not set. Add it on the Settings page.");
   }
@@ -16,7 +20,7 @@ function getApiKey(): string {
 }
 
 export function hasApiKey(): boolean {
-  return !!localStorage.getItem("tmdb_api_key");
+  return !!localStorage.getItem(TMDB_API_KEY_STORAGE);
 }
 
 async function tmdbGet<T>(path: string, params: Record<string, string> = {}): Promise<T> {
