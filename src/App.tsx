@@ -29,58 +29,66 @@ const TAB_ICONS: Record<Tab, ComponentType<IconProps>> = {
 
 function App() {
   const [tab, setTab] = useState<Tab>("home");
+  const [moviesInitialFilter, setMoviesInitialFilter] = useState<"wantToWatch" | null>(null);
+
+  function viewAllWantToWatchMovies() {
+    setMoviesInitialFilter("wantToWatch");
+    setTab("movies");
+  }
 
   return (
-    <div className="app-shell">
-      <header className="app-header">
-        <span className="brand">WatchTime</span>
-        {/* Hidden below 640px via CSS, the bottom-nav takes over there.
-            Settings is icon-only at every width (that's the "more space"
-            fix), the other four keep their text labels here since desktop/
-            tablet widths actually have room for them. */}
-        <nav className="top-nav">
-          {TAB_ORDER.map((t) => {
-            const Icon = TAB_ICONS[t];
-            const isSettings = t === "settings";
-            return (
-              <button
-                key={t}
-                className={tab === t ? "nav-active" : ""}
-                onClick={() => setTab(t)}
-                aria-label={isSettings ? "Settings" : undefined}
-              >
-                {isSettings ? <Icon size={20} /> : TAB_LABELS[t]}
-              </button>
-            );
-          })}
-        </nav>
-      </header>
-
-      <main>
-        {tab === "home" && <Home />}
-        {tab === "shows" && <Library />}
-        {tab === "movies" && <Movies />}
-        {tab === "discover" && <AddTitle />}
-        {tab === "settings" && <Settings />}
-      </main>
-
-      {/* display:none above 640px via CSS, this is the mobile-only nav. */}
-      <nav className="bottom-nav">
+    <>
+      <nav className="side-rail">
+        <span className="side-rail-mark" aria-hidden="true">R</span>
         {TAB_ORDER.map((t) => {
           const Icon = TAB_ICONS[t];
           return (
             <button
               key={t}
-              className={`bottom-nav-item ${tab === t ? "active" : ""}`}
+              className={`side-rail-item ${tab === t ? "active" : ""}`}
               onClick={() => setTab(t)}
+              aria-label={TAB_LABELS[t]}
+              aria-current={tab === t ? "page" : undefined}
             >
               <Icon size={22} />
-              <span>{TAB_LABELS[t]}</span>
             </button>
           );
         })}
       </nav>
-    </div>
+
+      <div className="app-shell">
+        <header className="app-header">
+          <span className="brand">WatchTime</span>
+        </header>
+
+        <main>
+          {tab === "home" && <Home onViewAllMovies={viewAllWantToWatchMovies} />}
+          {tab === "shows" && <Library />}
+          {tab === "movies" && (
+            <Movies initialFilter={moviesInitialFilter} onInitialFilterConsumed={() => setMoviesInitialFilter(null)} />
+          )}
+          {tab === "discover" && <AddTitle />}
+          {tab === "settings" && <Settings />}
+        </main>
+
+        {/* display:none above 640px via CSS, this is the mobile-only nav. */}
+        <nav className="bottom-nav">
+          {TAB_ORDER.map((t) => {
+            const Icon = TAB_ICONS[t];
+            return (
+              <button
+                key={t}
+                className={`bottom-nav-item ${tab === t ? "active" : ""}`}
+                onClick={() => setTab(t)}
+              >
+                <Icon size={22} />
+                <span>{TAB_LABELS[t]}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+    </>
   );
 }
 

@@ -3,6 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../db";
 import { getTvShowDetails, getMovieDetails } from "../tmdb";
 import { averageRuntime } from "./runtime";
+import { totalEpisodeCount } from "./episodeSync";
 
 export interface DurationParts {
   months: number;
@@ -43,7 +44,12 @@ export function useShowStats() {
     // only checked undefined, so a failed attempt got stuck at null
     // forever with no retry, contributing zero permanently. That was a
     // real bug, not just a missing-data limitation.
-    const needing = shows.filter((s) => s.episodeRuntimeMinutes == null);
+    // Also catches numberOfEpisodes == null on its own: a show backfilled
+    // for episodeRuntimeMinutes under an older schema version wouldn't be
+    // picked up again by the runtime check alone once that field is set,
+    // and would otherwise sit with no episode total (and no progress bar
+    // on the Shows grid) permanently.
+    const needing = shows.filter((s) => s.episodeRuntimeMinutes == null || s.numberOfEpisodes == null);
     if (needing.length === 0) return;
     let cancelled = false;
     async function backfill() {
@@ -56,6 +62,7 @@ export function useShowStats() {
           const details = await getTvShowDetails(show.tmdbId);
           await db.shows.update(show.tmdbId, {
             episodeRuntimeMinutes: averageRuntime(details.episode_run_time),
+            numberOfEpisodes: totalEpisodeCount(details.seasons),
             genreIds: show.genreIds ?? details.genres.map((g) => g.id),
             imdbId: show.imdbId ?? details.external_ids?.imdb_id ?? null,
           });
@@ -63,7 +70,7 @@ export function useShowStats() {
           // Genuine fetch/network error, leave as null so it's retried
           // next time (unlike "TMDB responded with no data", which
           // averageRuntime already resolves to the fallback, never null).
-          await db.shows.update(show.tmdbId, { episodeRuntimeMinutes: null });
+          await db.shows.update(show.tmdbId, { episodeRuntimeMinutes: null, numberOfEpisodes: null });
         }
         done++;
         setBackfillProgress({ done, total: needing.length });
@@ -128,7 +135,7 @@ export function useMovieStats() {
 
   useEffect(() => {
     if (!movies) return;
-    const needing = movies.filter((m) => m.runtimeMinutes == null);
+    const needing = movies.filter((m) => m.runtimeMinutes == null || m.releaseDate == null);
     if (needing.length === 0) return;
     let cancelled = false;
     async function backfill() {
@@ -141,11 +148,12 @@ export function useMovieStats() {
           const details = await getMovieDetails(movie.tmdbId);
           await db.movies.update(movie.tmdbId, {
             runtimeMinutes: details.runtime ?? FALLBACK_MOVIE_RUNTIME_MINUTES,
+            releaseDate: details.release_date,
             genreIds: movie.genreIds ?? details.genres.map((g) => g.id),
             imdbId: movie.imdbId ?? details.external_ids?.imdb_id ?? null,
           });
         } catch {
-          await db.movies.update(movie.tmdbId, { runtimeMinutes: null });
+          await db.movies.update(movie.tmdbId, { runtimeMinutes: null, releaseDate: null });
         }
         done++;
         setBackfillProgress({ done, total: needing.length });

@@ -172,28 +172,48 @@ export default function Settings() {
       <h2>Settings</h2>
 
       <details open>
-        <summary><h3 style={{ display: "inline" }}>Import from TV Time</h3></summary>
+        <summary>
+          <span className="settings-row-text">
+            <h3>Import from TV Time</h3>
+            <p className="muted small settings-row-sub">JSON export recommended, CSV fallback available</p>
+          </span>
+        </summary>
         <div style={{ marginTop: 14 }}>
           <ImportWizard />
         </div>
       </details>
 
       <details>
-        <summary><h3 style={{ display: "inline" }}>API Keys</h3></summary>
+        <summary>
+          <span className="settings-row-text">
+            <h3>API Keys</h3>
+            <p className="muted small settings-row-sub">TMDB required, OMDb optional for ratings</p>
+          </span>
+        </summary>
         <div style={{ marginTop: 14 }}>
           <ApiKeys />
         </div>
       </details>
 
       <details>
-        <summary><h3 style={{ display: "inline" }}>Diagnostics</h3></summary>
+        <summary>
+          <span className="settings-row-text">
+            <h3>Diagnostics</h3>
+            <p className="muted small settings-row-sub">Compare stored data against TMDB for a show</p>
+          </span>
+        </summary>
         <div style={{ marginTop: 14 }}>
           <Diagnostics />
         </div>
       </details>
 
       <details>
-        <summary><h3 style={{ display: "inline", color: "var(--danger)" }}>Reset Data</h3></summary>
+        <summary>
+          <span className="settings-row-text settings-row-danger">
+            <h3>Reset Data</h3>
+            <p className="small settings-row-sub">Deletes shows, movies, and watch history</p>
+          </span>
+        </summary>
         <div style={{ marginTop: 14 }}>
           <ResetData />
         </div>

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type Episode, type Show } from "../db";
-import { TMDB_IMAGE_BASE, getMovieGenres, type Genre } from "../tmdb";
-import { ensureEpisodesCached, findNextUnwatched, countAdditionalUnwatched } from "../lib/episodeSync";
+import { TMDB_IMAGE_BASE } from "../tmdb";
+import { ensureEpisodesCached, findNextUnwatched, countAdditionalUnwatched, findNextUpcoming } from "../lib/episodeSync";
 import { daysSince, STALE_DAYS_THRESHOLD } from "../lib/showStatus";
 import DetailsPanel from "../components/DetailsPanel";
 
@@ -222,15 +222,146 @@ function ShowsHome({ onOpenShow }: { onOpenShow: (tmdbId: number) => void }) {
   );
 }
 
-function MoviesHome() {
+function formatUpcomingDate(iso: string | null): string {
+  if (!iso) return "";
+  const date = new Date(`${iso}T00:00:00`);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((date.getTime() - today.getTime()) / 86400000);
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Tomorrow";
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+interface UpcomingEpisodeRow {
+  showId: number;
+  showName: string;
+  posterPath: string | null;
+  episode: Episode;
+}
+
+/**
+ * Upcoming episodes (confirmed future air_date, across followed shows) and
+ * movies releasing this calendar month (from Movie.releaseDate, backfilled
+ * by useShowStats/useMovieStats for libraries that predate that field).
+ * Deliberately reuses data already loaded elsewhere on Home rather than
+ * issuing new network requests, this only reads db.episodes, which
+ * ShowsHome's sync effect already keeps populated for every followed show.
+ */
+function ComingUp({ onOpenShow }: { onOpenShow: (tmdbId: number) => void }) {
+  const shows = useLiveQuery(() => db.shows.filter((s) => s.isFollowed && !s.isArchived).toArray(), []);
+  const allEpisodes = useLiveQuery(() => db.episodes.toArray(), []);
+  const movies = useLiveQuery(() => db.movies.toArray(), []);
+  const [openMovie, setOpenMovie] = useState<number | null>(null);
+
+  const upcomingEpisodes = useMemo<UpcomingEpisodeRow[]>(() => {
+    if (!shows || !allEpisodes) return [];
+    const episodesByShow = new Map<number, Episode[]>();
+    for (const ep of allEpisodes) {
+      const list = episodesByShow.get(ep.showId);
+      if (list) list.push(ep);
+      else episodesByShow.set(ep.showId, [ep]);
+    }
+    const rows: UpcomingEpisodeRow[] = [];
+    for (const show of shows) {
+      const next = findNextUpcoming(episodesByShow.get(show.tmdbId) ?? []);
+      if (next) rows.push({ showId: show.tmdbId, showName: show.name, posterPath: show.posterPath, episode: next });
+    }
+    rows.sort((a, b) => (a.episode.airDate as string).localeCompare(b.episode.airDate as string));
+    return rows.slice(0, 6);
+  }, [shows, allEpisodes]);
+
+  const releasingThisMonth = useMemo(() => {
+    if (!movies) return [];
+    const now = new Date();
+    const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+    const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const monthEndExclusive = `${nextMonthDate.getFullYear()}-${String(nextMonthDate.getMonth() + 1).padStart(2, "0")}-01`;
+    return movies
+      .filter((m) => m.releaseDate && m.releaseDate >= monthStart && m.releaseDate < monthEndExclusive)
+      .sort((a, b) => (a.releaseDate as string).localeCompare(b.releaseDate as string))
+      .slice(0, 6);
+  }, [movies]);
+
+  if (!shows || !allEpisodes || !movies) return null;
+  if (upcomingEpisodes.length === 0 && releasingThisMonth.length === 0) return null;
+
+  return (
+    <>
+      <h3 className="section-title">Coming up</h3>
+      <div className="coming-up-cols">
+        <div className="coming-up-col">
+          <p className="muted small coming-up-col-label">Upcoming episodes</p>
+          {upcomingEpisodes.length === 0 && <p className="muted small">Nothing confirmed yet.</p>}
+          {upcomingEpisodes.map((row) => (
+            <div
+              key={row.showId}
+              className="up-row"
+              role="button"
+              tabIndex={0}
+              onClick={() => onOpenShow(row.showId)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onOpenShow(row.showId);
+                }
+              }}
+            >
+              {row.posterPath ? (
+                <img src={`${TMDB_IMAGE_BASE}${row.posterPath}`} alt="" className="up-row-poster" />
+              ) : (
+                <div className="poster-placeholder up-row-poster" />
+              )}
+              <div className="up-row-body">
+                <p className="show-name">{row.showName}</p>
+                <p className="muted small">
+                  S{String(row.episode.seasonNumber).padStart(2, "0")} | E
+                  {String(row.episode.episodeNumber).padStart(2, "0")}
+                </p>
+              </div>
+              <span className="up-row-date">{formatUpcomingDate(row.episode.airDate)}</span>
+            </div>
+          ))}
+        </div>
+        <div className="coming-up-col">
+          <p className="muted small coming-up-col-label">Releasing this month</p>
+          {releasingThisMonth.length === 0 && <p className="muted small">Nothing this month.</p>}
+          {releasingThisMonth.map((m) => (
+            <div
+              key={m.tmdbId}
+              className="up-row"
+              role="button"
+              tabIndex={0}
+              onClick={() => setOpenMovie(m.tmdbId)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setOpenMovie(m.tmdbId);
+                }
+              }}
+            >
+              {m.posterPath ? (
+                <img src={`${TMDB_IMAGE_BASE}${m.posterPath}`} alt="" className="up-row-poster" />
+              ) : (
+                <div className="poster-placeholder up-row-poster" />
+              )}
+              <div className="up-row-body">
+                <p className="show-name">{m.title}</p>
+                <p className="muted small">{m.wantsToWatch ? "Want to watch" : "\u00a0"}</p>
+              </div>
+              <span className="up-row-date">{formatUpcomingDate(m.releaseDate ?? null)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      {openMovie !== null && <DetailsPanel kind="movie" tmdbId={openMovie} onClose={() => setOpenMovie(null)} />}
+    </>
+  );
+}
+
+function MoviesHome({ onViewAll }: { onViewAll: () => void }) {
   const wantToWatch = useLiveQuery(() => db.movies.filter((m) => !m.watched && m.wantsToWatch).toArray(), []);
   const [openDetails, setOpenDetails] = useState<number | null>(null);
-  const [genreFilter, setGenreFilter] = useState<number | null>(null);
-  const [genres, setGenres] = useState<Genre[]>([]);
-
-  useEffect(() => {
-    getMovieGenres().then(setGenres).catch(() => setGenres([]));
-  }, []);
 
   if (!wantToWatch) return <p className="muted">Loading...</p>;
 
@@ -238,67 +369,60 @@ function MoviesHome() {
     await db.movies.update(tmdbId, { watched: true, watchedAt: new Date().toISOString() });
   }
 
-  const visible = genreFilter === null ? wantToWatch : wantToWatch.filter((m) => m.genreIds?.includes(genreFilter));
-
   return (
     <>
-      <h2>Movies to Watch</h2>
+      <h3 className="section-title">Movies to Watch</h3>
 
-      {wantToWatch.length > 0 && (
-        <div className="field-row">
-          <select
-            value={genreFilter ?? ""}
-            onChange={(e) => setGenreFilter(e.target.value ? Number(e.target.value) : null)}
-          >
-            <option value="">All genres</option>
-            {genres.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.name}
-              </option>
+      {wantToWatch.length === 0 ? (
+        <p className="muted">Nothing on your movie watchlist right now.</p>
+      ) : (
+        <>
+          {/* overflow: hidden (not auto/scroll) is deliberate: whatever
+              doesn't fit in one row is simply not shown, rather than
+              scrollable. The number of cards that fit adapts to viewport
+              width automatically via CSS, no resize observer or JS
+              measurement needed. View all is the escape hatch for
+              anything clipped. */}
+          <div className="mtw-rail">
+            {wantToWatch.map((m) => (
+              <div key={m.tmdbId} className="mtw-card">
+                {m.posterPath ? (
+                  <img
+                    className="mtw-poster"
+                    src={`${TMDB_IMAGE_BASE}${m.posterPath}`}
+                    alt={m.title}
+                    onClick={() => setOpenDetails(m.tmdbId)}
+                  />
+                ) : (
+                  <div className="poster-placeholder mtw-poster" onClick={() => setOpenDetails(m.tmdbId)} />
+                )}
+                <p className="show-name mtw-name" onClick={() => setOpenDetails(m.tmdbId)}>
+                  {m.title}
+                </p>
+                <button onClick={() => markWatched(m.tmdbId)}>Mark watched</button>
+              </div>
             ))}
-          </select>
-        </div>
-      )}
-
-      {visible.length === 0 && <p className="muted">Nothing on your movie watchlist right now.</p>}
-      <div className="watch-next-list">
-        {visible.map((m) => (
-          <div key={m.tmdbId} className="watch-next-row">
-            {m.posterPath ? (
-              <img src={`${TMDB_IMAGE_BASE}${m.posterPath}`} alt={m.title} onClick={() => setOpenDetails(m.tmdbId)} />
-            ) : (
-              <div className="poster-placeholder wn-poster" onClick={() => setOpenDetails(m.tmdbId)} />
-            )}
-            <div className="wn-body">
-              <p className="show-name" onClick={() => setOpenDetails(m.tmdbId)}>
-                {m.title} {m.releaseYear ? `(${m.releaseYear})` : ""}
-              </p>
-            </div>
-            <button onClick={() => markWatched(m.tmdbId)}>Mark watched</button>
           </div>
-        ))}
-      </div>
+          <button className="view-all-link" onClick={onViewAll}>
+            View all &rsaquo;
+          </button>
+        </>
+      )}
       {openDetails !== null && <DetailsPanel kind="movie" tmdbId={openDetails} onClose={() => setOpenDetails(null)} />}
     </>
   );
 }
 
-export default function Home() {
-  const [view, setView] = useState<"shows" | "movies">("shows");
+export default function Home({ onViewAllMovies }: { onViewAllMovies: () => void }) {
   const [openShow, setOpenShow] = useState<number | null>(null);
 
   return (
     <div className="panel">
-      <div className="home-toggle">
-        <button className={view === "shows" ? "nav-active" : ""} onClick={() => setView("shows")}>
-          TV Shows
-        </button>
-        <button className={view === "movies" ? "nav-active" : ""} onClick={() => setView("movies")}>
-          Movies
-        </button>
-      </div>
+      <ShowsHome onOpenShow={setOpenShow} />
 
-      {view === "shows" ? <ShowsHome onOpenShow={setOpenShow} /> : <MoviesHome />}
+      <MoviesHome onViewAll={onViewAllMovies} />
+
+      <ComingUp onOpenShow={setOpenShow} />
 
       {openShow !== null && <DetailsPanel kind="show" tmdbId={openShow} onClose={() => setOpenShow(null)} />}
     </div>

@@ -5,11 +5,30 @@ import { TMDB_IMAGE_BASE, getTvGenres, type Genre } from "../tmdb";
 import { computeWatchStatus, type ShowWatchStatus } from "../lib/showWatchStatus";
 import { useShowStats, toDurationParts } from "../lib/stats";
 import DetailsPanel from "../components/DetailsPanel";
+import FilterSheet from "../components/FilterSheet";
+import SegmentedControl from "../components/SegmentedControl";
+import GenreChips from "../components/GenreChips";
+import { useIsMobile } from "../lib/useIsMobile";
 
 type SortKey = "name" | "mostWatched" | "recentlyWatched" | "recentlyAdded";
 type FilterKey = "all" | "following" | "stopped" | "currentlyWatching";
 
+const STATUS_OPTIONS: { value: FilterKey; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "following", label: "Following" },
+  { value: "currentlyWatching", label: "Currently Watching" },
+  { value: "stopped", label: "Stopped" },
+];
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: "name", label: "Name (A-Z)" },
+  { value: "mostWatched", label: "Most watched" },
+  { value: "recentlyWatched", label: "Recently watched" },
+  { value: "recentlyAdded", label: "Recently added" },
+];
+
 export default function Library() {
+  const isMobile = useIsMobile();
   const shows = useLiveQuery(() => db.shows.toArray(), []);
   const watchedCounts = useLiveQuery(async () => {
     const all = await db.watchedEpisodes.toArray();
@@ -24,6 +43,7 @@ export default function Library() {
   const [genreFilter, setGenreFilter] = useState<number | null>(null);
   const [genres, setGenres] = useState<Genre[]>([]);
   const [statusByShow, setStatusByShow] = useState<Map<number, ShowWatchStatus>>(new Map());
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
 
   const stats = useShowStats();
 
@@ -134,41 +154,69 @@ export default function Library() {
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search your shows..."
             />
-            <select value={filterKey} onChange={(e) => setFilterKey(e.target.value as FilterKey)}>
-              <option value="all">All</option>
-              <option value="following">Following</option>
-              <option value="currentlyWatching">Currently Watching</option>
-              <option value="stopped">Stopped</option>
-            </select>
-            <select
-              value={genreFilter ?? ""}
-              onChange={(e) => setGenreFilter(e.target.value ? Number(e.target.value) : null)}
-            >
-              <option value="">All genres</option>
-              {genres.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.name}
-                </option>
-              ))}
-            </select>
-            <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
-              <option value="name">Name (A-Z)</option>
-              <option value="mostWatched">Most episodes watched</option>
-              <option value="recentlyWatched">Recently watched</option>
-              <option value="recentlyAdded">Recently added</option>
-            </select>
+            <FilterSheet resultCount={visible.length} open={filterSheetOpen} onOpenChange={setFilterSheetOpen}>
+              <SegmentedControl options={STATUS_OPTIONS} value={filterKey} onChange={setFilterKey} />
+              {isMobile ? (
+                <GenreChips genres={genres} value={genreFilter} onChange={setGenreFilter} />
+              ) : (
+                <select
+                  className="compact-select"
+                  value={genreFilter ?? ""}
+                  onChange={(e) => setGenreFilter(e.target.value ? Number(e.target.value) : null)}
+                >
+                  <option value="">All genres</option>
+                  {genres.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {isMobile ? (
+                <SegmentedControl options={SORT_OPTIONS} value={sortKey} onChange={setSortKey} />
+              ) : (
+                <select className="compact-select" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
+                  {SORT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </FilterSheet>
           </div>
 
           {visible.length === 0 && <p className="muted">No shows match that search/filter.</p>}
 
           <div className="show-grid">
             {visible.map((show) => (
-              <div key={show.tmdbId} className="show-card" onClick={() => setOpenDetails(show.tmdbId)}>
+              <div
+                key={show.tmdbId}
+                className="show-card"
+                role="button"
+                tabIndex={0}
+                onClick={() => setOpenDetails(show.tmdbId)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setOpenDetails(show.tmdbId);
+                  }
+                }}
+              >
                 {show.posterPath ? (
                   <img src={`${TMDB_IMAGE_BASE}${show.posterPath}`} alt={show.name} />
                 ) : (
                   <div className="poster-placeholder" />
                 )}
+                {show.numberOfEpisodes ? (
+                  <div className="poster-progress">
+                    <span
+                      style={{
+                        width: `${Math.min(100, ((watchedCounts?.get(show.tmdbId) ?? 0) / show.numberOfEpisodes) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                ) : null}
                 <div className="show-card-body">
                   <p className="show-name">{show.name}</p>
                   <p className="muted small">{watchedCounts?.get(show.tmdbId) ?? 0} episodes watched</p>

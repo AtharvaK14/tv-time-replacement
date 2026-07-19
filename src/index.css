@@ -1,14 +1,14 @@
 :root {
-  --bg: #12151a;
-  --surface: #1a1f27;
-  --surface-raised: #212733;
-  --border: #2a3140;
-  --text: #e7eaef;
-  --muted: #8b94a3;
-  --accent: #4fd1ae;
-  --accent-dim: #2f6b5c;
-  --danger: #e0665c;
-  --font-display: -apple-system, "Segoe UI", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --bg: #0A0A0B;
+  --surface: #141416;
+  --surface-raised: #1D1D20;
+  --border: #26262A;
+  --text: #F2F1EF;
+  --muted: #86858A;
+  --accent: #FF4433;
+  --accent-dim: #7A2A20;
+  --danger: #FF4433;
+  --font-display: "Inter", -apple-system, "Segoe UI", ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Code", monospace;
 }
 
@@ -28,7 +28,6 @@ body {
 .app-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   padding: 20px 0;
   border-bottom: 1px solid var(--border);
   margin-bottom: 24px;
@@ -40,22 +39,6 @@ body {
   letter-spacing: -0.02em;
   color: var(--accent);
 }
-
-.app-header nav { display: flex; gap: 4px; }
-
-.app-header nav button {
-  background: none;
-  border: none;
-  color: var(--muted);
-  padding: 8px 14px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 0.95rem;
-}
-
-.app-header nav button:hover { background: var(--surface); color: var(--text); }
-.app-header nav button.nav-active { background: var(--surface-raised); color: var(--accent); font-weight: 600; }
-.nav-active { background: var(--surface-raised); color: var(--accent); font-weight: 600; }
 
 .panel { display: flex; flex-direction: column; gap: 14px; }
 
@@ -126,11 +109,11 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 
 .show-card {
-  display: flex;
-  flex-direction: column;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  position: relative;
+  display: block;
+  background: none;
+  border: none;
+  border-radius: 8px;
   overflow: hidden;
   padding: 0;
   text-align: left;
@@ -138,11 +121,69 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   color: var(--text);
 }
 
-.show-card img { width: 100%; aspect-ratio: 2/3; object-fit: cover; display: block; }
-.poster-placeholder { width: 100%; aspect-ratio: 2/3; background: var(--surface-raised); }
-.show-card-body { padding: 10px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
-.show-name { margin: 0; font-size: 0.9rem; font-weight: 600; line-height: 1.3; }
-.movie-card { cursor: default; }
+.show-card img { width: 100%; aspect-ratio: 2/3; object-fit: cover; display: block; border-radius: 8px; }
+.poster-placeholder { width: 100%; aspect-ratio: 2/3; background: var(--surface-raised); border-radius: 8px; }
+.show-card-body {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  padding: 22px 8px 8px;
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.85));
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.show-name { margin: 0; font-size: 0.85rem; font-weight: 600; line-height: 1.3; }
+.movie-card { cursor: pointer; }
+
+/* Desktop/mouse only: caption stays hidden until hover or keyboard focus,
+   so the grid reads as a clean poster wall rather than a stack of cards.
+   (hover: none) devices (touch) never match this, the caption there stays
+   at its default opacity: 1, always visible, since there's no hover to
+   reveal it with. */
+@media (hover: hover) and (pointer: fine) {
+  .show-card-body {
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+  .show-card:hover .show-card-body,
+  .show-card:focus-visible .show-card-body {
+    opacity: 1;
+  }
+}
+
+.watched-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--border);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  padding: 0;
+  z-index: 2;
+}
+.watched-badge.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+
+.poster-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 2;
+}
+.poster-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
 
 .progress-block, .result-block { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
 
@@ -182,7 +223,6 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .episode-list { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 4px; }
 
 .episode-list li { padding: 6px 8px; border-radius: 6px; }
-.episode-list li.watched { background: rgba(79, 209, 174, 0.08); }
 
 .episode-list label { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .ep-number { font-family: var(--font-mono); color: var(--muted); font-size: 0.85rem; width: 40px; flex-shrink: 0; }
@@ -219,11 +259,17 @@ hr { border: none; border-top: 1px solid var(--border); }
 .details-layout { display: flex; gap: 20px; align-items: flex-start; }
 .details-poster { width: 160px; aspect-ratio: 2/3; object-fit: cover; border-radius: 8px; flex-shrink: 0; }
 .details-body { display: flex; flex-direction: column; gap: 10px; }
-.ratings-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ratings-row { display: flex; gap: 0; align-items: center; flex-wrap: wrap; font-size: 0.95rem; color: var(--muted); }
 .rating-pill {
-  background: var(--surface-raised); border: 1px solid var(--border); border-radius: 999px;
-  padding: 3px 10px; font-size: 0.85rem; font-family: var(--font-mono);
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  font-family: inherit;
+  color: var(--text);
+  font-weight: 700;
 }
+.rating-pill:not(:last-child)::after { content: " \00b7 "; color: var(--border); font-weight: 400; margin: 0 2px; }
 .overview { line-height: 1.5; color: var(--text); }
 
 .settings-block { border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 4px; }
@@ -240,8 +286,6 @@ hr { border: none; border-top: 1px solid var(--border); }
 .match-method-list { margin: 8px 0 0; padding-left: 20px; }
 .match-method-list li { margin-bottom: 4px; }
 
-.home-toggle { display: flex; gap: 8px; margin-bottom: 8px; }
-.home-toggle button { border-radius: 999px; padding: 6px 16px; font-size: 0.9rem; }
 
 .diagnostic-report {
   background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
@@ -260,10 +304,23 @@ hr { border: none; border-top: 1px solid var(--border); }
 .season-browser { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px; max-height: 50vh; overflow-y: auto; overscroll-behavior: contain; }
 .season-header-right { display: flex; align-items: center; gap: 10px; }
 
+.season-progress {
+  height: 3px;
+  background: var(--surface-raised);
+  border-radius: 2px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+.season-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
 .episode-row {
   display: flex; align-items: center; gap: 10px; padding: 6px 4px !important;
 }
-.episode-row.watched { background: rgba(79, 209, 174, 0.08); }
+.episode-row.watched { background: rgba(255, 68, 51, 0.08); }
 .episode-thumb {
   width: 64px; height: 36px; object-fit: cover; border-radius: 4px; flex-shrink: 0; cursor: pointer;
   background: var(--surface-raised);
@@ -285,31 +342,6 @@ hr { border: none; border-top: 1px solid var(--border); }
 .discover-sections h3 { margin-top: 0; }
 
 .episode-still { aspect-ratio: 16/9; }
-
-.watched-pill {
-  width: 100%;
-  border-radius: 0 0 10px 10px;
-  border: none;
-  border-top: 1px solid var(--border);
-  background: var(--surface-raised);
-  color: var(--muted);
-  font-size: 0.82rem;
-  padding: 8px 0;
-  cursor: pointer;
-  transition: background 0.25s ease, color 0.25s ease, transform 0.15s ease;
-}
-.watched-pill:hover { color: var(--text); }
-.watched-pill.on {
-  background: var(--accent-dim);
-  color: var(--accent);
-  font-weight: 600;
-  animation: watched-pop 0.3s ease;
-}
-@keyframes watched-pop {
-  0% { transform: scale(1); }
-  40% { transform: scale(1.04); }
-  100% { transform: scale(1); }
-}
 
 .danger-button {
   background: rgba(224, 102, 92, 0.12);
@@ -511,29 +543,86 @@ hr { border: none; border-top: 1px solid var(--border); }
 }
 
 /* ============================================================
-   Responsive nav. Append this block to the end of index.css.
-   Top nav (.top-nav, inside .app-header) is used above 640px.
-   Bottom tab bar (.bottom-nav) takes over below 640px, a single
-   text row can't fit 5 tabs + the logo at phone widths no matter
-   how the top nav is styled, so it's hidden there entirely
-   rather than trying to keep shrinking it.
+   Left icon rail (desktop, matches the approved mockups) and
+   bottom tab bar (mobile, unchanged). The old horizontal
+   top-nav-with-text-labels pattern is gone entirely, replaced
+   by the rail at every width above the mobile breakpoint, not
+   just wide desktop, there's no longer a middle width where
+   neither nav renders.
    ============================================================ */
 
-.app-header nav.top-nav button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.side-rail {
+  display: none;
 }
 
 .bottom-nav {
-  display: none; /* shown only inside the media query below */
+  display: none; /* shown only inside the max-width:640px media query below */
+}
+
+@media (min-width: 641px) {
+  .side-rail {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 68px;
+    padding: 20px 0;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    z-index: 6; /* above bottom-nav/modals' z-index, though bottom-nav is hidden at this width anyway */
+  }
+
+  .side-rail-mark {
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
+    background: var(--text);
+    color: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 0.95rem;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+  }
+
+  .side-rail-item {
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 0;
+    position: relative;
+  }
+  .side-rail-item:hover { background: var(--surface-raised); color: var(--text); }
+  .side-rail-item.active { background: var(--surface-raised); color: var(--accent); }
+  .side-rail-item.active::before {
+    content: "";
+    position: absolute;
+    left: -9px; /* sits in the rail's own left padding area, not overlapping the icon */
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 18px;
+    background: var(--accent);
+    border-radius: 2px;
+  }
+
+  body { padding-left: 68px; }
 }
 
 @media (max-width: 640px) {
-  .app-header nav.top-nav {
-    display: none;
-  }
-
   /* Room at the bottom so the last row of content in any page isn't
      hidden behind the fixed bottom nav. env(safe-area-inset-bottom)
      accounts for the home-indicator strip on notched iPhones. */
@@ -674,28 +763,11 @@ hr { border: none; border-top: 1px solid var(--border); }
   font-size: 1.5rem;
 }
 
-.desktop-two-col {
-  display: flex;
-  gap: 28px;
-  align-items: flex-start;
+.desktop-body {
   margin-top: 20px;
-}
-
-.desktop-overview-col {
-  flex: 1;
-  min-width: 0;
-}
-
-.desktop-sidebar-col {
-  width: 220px;
-  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px;
-  background: var(--surface-raised);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  gap: 14px;
 }
 
 /* Small polish items requested alongside the redesign: shadow to lift the
@@ -782,3 +854,299 @@ hr { border: none; border-top: 1px solid var(--border); }
     overscroll-behavior: auto;
   }
 }
+
+/* ============================================================
+   Deliberate focus ring. Nothing in this file previously set
+   outline:none anywhere, so the browser's default focus
+   indicator was always working, this isn't fixing a broken
+   state. It's replacing the default (usually blue, clashing with
+   the dark palette) with one that matches, and using
+   :focus-visible specifically so a mouse click doesn't show a
+   ring, only keyboard/AT navigation does.
+   ============================================================ */
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Native <details>/<summary>, used by Settings' four sections and
+   ImportWizard's skipped-titles lists. Previously fully unstyled (no
+   wrapper class was ever applied to the <details> elements themselves in
+   Settings.tsx), so this was rendering as the bare browser default
+   disclosure triangle against the dark theme, not a deliberate look. */
+details {
+  border-bottom: 1px solid var(--border);
+  padding: 14px 2px;
+}
+details:last-of-type { border-bottom: none; }
+summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+summary::-webkit-details-marker { display: none; }
+summary::after {
+  content: "\203A";
+  color: var(--muted);
+  font-size: 1.3rem;
+  line-height: 1;
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+details[open] > summary::after { transform: rotate(90deg); }
+
+.settings-row-text { display: flex; flex-direction: column; gap: 3px; }
+.settings-row-text h3 { font-size: 0.98rem; }
+.settings-row-sub { margin: 0; font-size: 0.82rem; }
+.settings-row-danger h3 { color: var(--danger); }
+.settings-row-danger .settings-row-sub { color: var(--danger); opacity: 0.75; }
+
+/* ============================================================
+   FilterSheet (mobile only, see components/FilterSheet.tsx).
+   .filter-sheet-body select is deliberately a 3-part descendant
+   selector (specificity 0,2,1) so it beats the older
+   .filters-row select rule (0,1,1) above regardless of source
+   order, that rule was written for three selects sharing one
+   row and would otherwise still apply here since these selects
+   remain, structurally, inside the same .filters-row container.
+   ============================================================ */
+
+.filter-sheet-trigger {
+  display: none; /* only rendered by the component on mobile, but keep this
+                     as a defensive default in case that ever changes */
+}
+
+@media (max-width: 640px) {
+  .filter-sheet-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .filter-sheet-trigger-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+}
+
+.filter-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-width: 640px;
+  margin: 0 auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 16px 16px 0 0;
+  padding: 0 20px 20px;
+  max-height: 80vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.filter-sheet-handle {
+  display: flex;
+  justify-content: center;
+  padding: 10px 0 6px;
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+}
+
+.filter-sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.filter-sheet-body select {
+  width: 100%;
+  flex: initial;
+  font-size: 0.95rem;
+  padding: 11px 12px;
+}
+
+.filter-sheet-apply {
+  width: 100%;
+  margin-top: 16px;
+  background: var(--text);
+  color: var(--bg);
+  border: none;
+  font-weight: 700;
+}
+.filter-sheet-apply:hover { border-color: transparent; }
+
+/* ============================================================
+   Home restructure: unified page (no more Shows/Movies toggle),
+   Continue Watching + Movies to Watch + Coming Up all on one
+   page. See pages/Home.tsx.
+   ============================================================ */
+
+.section-title {
+  margin: 28px 0 12px;
+  font-size: 1.05rem;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.section-title:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
+
+/* Desktop/wide viewports: Continue Watching becomes a horizontal rail,
+   matching the approved mockup, each card a fixed width instead of
+   stretching full-width. Mobile keeps the original vertical stack
+   entirely unchanged below 700px, that layout was already correct there. */
+@media (min-width: 700px) {
+  .watch-next-list {
+    flex-direction: row;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    gap: 14px;
+  }
+  .watch-next-row {
+    flex: 0 0 240px;
+  }
+}
+
+.coming-up-cols {
+  display: flex;
+  gap: 28px;
+  flex-wrap: wrap;
+}
+.coming-up-col {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.coming-up-col-label {
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.up-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.up-row:last-child { border-bottom: none; }
+.up-row-poster {
+  width: 34px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex-shrink: 0;
+  background: var(--surface-raised);
+}
+.up-row-body { flex: 1; min-width: 0; }
+.up-row-date {
+  font-size: 0.8rem;
+  color: var(--muted);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.mtw-rail {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  gap: 14px;
+}
+.mtw-card { width: 120px; flex-shrink: 0; }
+.mtw-poster {
+  width: 100%;
+  aspect-ratio: 2/3;
+  object-fit: cover;
+  border-radius: 8px;
+  display: block;
+  cursor: pointer;
+  background: var(--surface-raised);
+}
+.mtw-name {
+  font-size: 0.82rem;
+  margin: 6px 0 6px;
+  cursor: pointer;
+}
+.mtw-card button { width: 100%; font-size: 0.78rem; padding: 6px 0; }
+
+.view-all-link {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.view-all-link:hover { border-color: transparent; text-decoration: underline; }
+
+/* ============================================================
+   Segmented control (status filter), genre chips, and compact
+   selects, matching the approved filter mockups. Real <button>
+   elements throughout, not styled divs, so keyboard/AT users get
+   this for free rather than needing another accessibility patch.
+   ============================================================ */
+
+.segmented {
+  display: flex;
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+.segmented button {
+  font-size: 0.82rem;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-weight: 500;
+}
+.segmented button.active { background: var(--surface-raised); color: var(--text); font-weight: 600; }
+.segmented button:hover:not(.active) { border-color: transparent; color: var(--text); }
+
+.compact-select {
+  min-width: 0;
+  width: auto;
+  padding: 8px 10px;
+  font-size: 0.88rem;
+}
+
+.genre-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.opt {
+  font-size: 0.82rem;
+  padding: 6px 13px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-weight: 500;
+}
+.opt.active { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
+
+/* Inside the mobile sheet specifically, the segmented control and sort
+   options should stack as full-width chip rows rather than the compact
+   inline treatment used on desktop. */
+.filter-sheet-body .segmented { background: none; padding: 0; gap: 6px; }
+.filter-sheet-body .segmented button {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 13px;
+}
+.filter-sheet-body .segmented button.active { background: var(--text); color: var(--bg); border-color: var(--text); }

@@ -1,6 +1,7 @@
 import { db, episodeKey, type Show, type WatchedEpisode, type Movie } from "../db";
 import { getTvShowDetails, getMovieDetails } from "../tmdb";
 import { averageRuntime } from "../lib/runtime";
+import { totalEpisodeCount } from "../lib/episodeSync";
 import {
   parseWatchedMovies,
   parseWantToWatchMovies,
@@ -115,6 +116,7 @@ export async function runImport(
           isArchived: follow ? follow.is_archived === "true" : false,
           lastWatchedAt,
           episodeRuntimeMinutes: averageRuntime(details.episode_run_time),
+          numberOfEpisodes: totalEpisodeCount(details.seasons),
           genreIds: details.genres.map((g) => g.id),
           imdbId: details.external_ids?.imdb_id ?? null,
         };
@@ -183,6 +185,7 @@ export async function runImport(
         title: details.title,
         posterPath: details.poster_path,
         releaseYear: details.release_date ? Number(details.release_date.slice(0, 4)) : null,
+        releaseDate: details.release_date,
         watched: !!watchedRow,
         watchedAt: watchedRow?.created_at ?? null,
         wantsToWatch: wantedTitles.has(rawTitle),

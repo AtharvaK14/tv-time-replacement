@@ -4,18 +4,53 @@ import { db } from "../db";
 import { TMDB_IMAGE_BASE, getMovieGenres, type Genre } from "../tmdb";
 import { useMovieStats, toDurationParts } from "../lib/stats";
 import DetailsPanel from "../components/DetailsPanel";
+import FilterSheet from "../components/FilterSheet";
+import SegmentedControl from "../components/SegmentedControl";
+import GenreChips from "../components/GenreChips";
+import { useIsMobile } from "../lib/useIsMobile";
 
 type SortKey = "title" | "releaseYear" | "recentlyWatched" | "rating";
 type FilterKey = "all" | "watched" | "wantToWatch";
 
-export default function Movies() {
+const STATUS_OPTIONS: { value: FilterKey; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "watched", label: "Watched" },
+  { value: "wantToWatch", label: "Want to watch" },
+];
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: "title", label: "Title (A-Z)" },
+  { value: "releaseYear", label: "Release year" },
+  { value: "recentlyWatched", label: "Recently watched" },
+];
+
+export default function Movies({
+  initialFilter,
+  onInitialFilterConsumed,
+}: {
+  initialFilter?: FilterKey | null;
+  onInitialFilterConsumed?: () => void;
+}) {
   const movies = useLiveQuery(() => db.movies.toArray(), []);
+  const isMobile = useIsMobile();
   const [openDetails, setOpenDetails] = useState<number | null>(null);
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("title");
   const [filterKey, setFilterKey] = useState<FilterKey>("all");
   const [genreFilter, setGenreFilter] = useState<number | null>(null);
   const [genres, setGenres] = useState<Genre[]>([]);
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+
+  // One-shot: applies the filter Home's "View all" link requested, then
+  // tells App.tsx it's been consumed so navigating back here later
+  // (e.g. via the tab bar) doesn't keep forcing the same filter.
+  useEffect(() => {
+    if (initialFilter) {
+      setFilterKey(initialFilter);
+      onInitialFilterConsumed?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialFilter]);
 
   const stats = useMovieStats();
 
@@ -104,54 +139,75 @@ export default function Movies() {
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search your movies..."
             />
-            <select value={filterKey} onChange={(e) => setFilterKey(e.target.value as FilterKey)}>
-              <option value="all">All</option>
-              <option value="watched">Watched</option>
-              <option value="wantToWatch">Want to watch</option>
-            </select>
-            <select
-              value={genreFilter ?? ""}
-              onChange={(e) => setGenreFilter(e.target.value ? Number(e.target.value) : null)}
-            >
-              <option value="">All genres</option>
-              {genres.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.name}
-                </option>
-              ))}
-            </select>
-            <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
-              <option value="title">Title (A-Z)</option>
-              <option value="releaseYear">Release year</option>
-              <option value="recentlyWatched">Recently watched</option>
-            </select>
+            <FilterSheet resultCount={visible.length} open={filterSheetOpen} onOpenChange={setFilterSheetOpen}>
+              <SegmentedControl options={STATUS_OPTIONS} value={filterKey} onChange={setFilterKey} />
+              {isMobile ? (
+                <GenreChips genres={genres} value={genreFilter} onChange={setGenreFilter} />
+              ) : (
+                <select
+                  className="compact-select"
+                  value={genreFilter ?? ""}
+                  onChange={(e) => setGenreFilter(e.target.value ? Number(e.target.value) : null)}
+                >
+                  <option value="">All genres</option>
+                  {genres.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {isMobile ? (
+                <SegmentedControl options={SORT_OPTIONS} value={sortKey} onChange={setSortKey} />
+              ) : (
+                <select className="compact-select" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
+                  {SORT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </FilterSheet>
           </div>
 
           {visible.length === 0 && <p className="muted">No movies match that search/filter.</p>}
 
           <div className="show-grid">
             {visible.map((m) => (
-              <div key={m.tmdbId} className="show-card movie-card">
+              <div
+                key={m.tmdbId}
+                className="show-card movie-card"
+                role="button"
+                tabIndex={0}
+                onClick={() => setOpenDetails(m.tmdbId)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setOpenDetails(m.tmdbId);
+                  }
+                }}
+              >
                 {m.posterPath ? (
-                  <img
-                    src={`${TMDB_IMAGE_BASE}${m.posterPath}`}
-                    alt={m.title}
-                    onClick={() => setOpenDetails(m.tmdbId)}
-                  />
+                  <img src={`${TMDB_IMAGE_BASE}${m.posterPath}`} alt={m.title} />
                 ) : (
-                  <div className="poster-placeholder" onClick={() => setOpenDetails(m.tmdbId)} />
+                  <div className="poster-placeholder" />
                 )}
+                <button
+                  className={`watched-badge ${m.watched ? "on" : ""}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleWatched(m.tmdbId, m.watched);
+                  }}
+                  aria-label={m.watched ? "Mark unwatched" : "Mark watched"}
+                >
+                  &#10003;
+                </button>
                 <div className="show-card-body">
-                  <p className="show-name" onClick={() => setOpenDetails(m.tmdbId)}>
+                  <p className="show-name">
                     {m.title} {m.releaseYear ? `(${m.releaseYear})` : ""}
                   </p>
                 </div>
-                <button
-                  className={`watched-pill ${m.watched ? "on" : ""}`}
-                  onClick={() => toggleWatched(m.tmdbId, m.watched)}
-                >
-                  {m.watched ? "Watched" : "Mark watched"}
-                </button>
               </div>
             ))}
           </div>

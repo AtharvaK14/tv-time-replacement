@@ -55,9 +55,9 @@ function MovieRow({ items, onOpen }: { items: MovieSearchResult[]; onOpen: (id: 
 
 export default function AddTitle() {
   const [query, setQuery] = useState("");
-  const [kind, setKind] = useState<"show" | "movie">("show");
   const [showResults, setShowResults] = useState<TvSearchResult[]>([]);
   const [movieResults, setMovieResults] = useState<MovieSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
   const [openDetails, setOpenDetails] = useState<{ kind: "show" | "movie"; tmdbId: number } | null>(null);
 
   const [popularShows, setPopularShows] = useState<TvSearchResult[] | null>(null);
@@ -66,7 +66,7 @@ export default function AddTitle() {
   const [atHomeMovies, setAtHomeMovies] = useState<MovieSearchResult[] | null>(null);
   const [discoverError, setDiscoverError] = useState<string | null>(null);
 
-  const hasSearched = query.trim().length > 0 && (showResults.length > 0 || movieResults.length > 0);
+  const hasSearched = query.trim().length > 0;
 
   useEffect(() => {
     if (!hasApiKey()) return;
@@ -94,43 +94,67 @@ export default function AddTitle() {
     };
   }, []);
 
-  async function handleSearch() {
-    if (!query.trim()) return;
-    if (kind === "show") {
-      setShowResults(await searchTvShow(query.trim()));
-    } else {
-      setMovieResults(await searchMovie(query.trim()));
+  // Debounced live search: fires 300ms after the user stops typing, not on
+  // every keystroke, and both TV/movie searches run in parallel rather
+  // than needing a Show/Movie toggle to pick which one to search.
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setShowResults([]);
+      setMovieResults([]);
+      setSearching(false);
+      return;
     }
-  }
+    setSearching(true);
+    let cancelled = false;
+    const handle = window.setTimeout(async () => {
+      try {
+        const [shows, movies] = await Promise.all([searchTvShow(trimmed), searchMovie(trimmed)]);
+        if (cancelled) return;
+        setShowResults(shows);
+        setMovieResults(movies);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [query]);
 
   return (
     <div className="panel">
       <h2>Discover</h2>
       <div className="field-row">
-        <select value={kind} onChange={(e) => setKind(e.target.value as "show" | "movie")}>
-          <option value="show">TV show</option>
-          <option value="movie">Movie</option>
-        </select>
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-          placeholder="Search TMDB..."
+          placeholder="Search for a show or movie..."
+          style={{ flex: 1, minWidth: 0 }}
         />
-        <button onClick={handleSearch}>Search</button>
       </div>
 
       {!hasApiKey() && <p className="status-error">Add your TMDB API key on the Settings page to search or browse.</p>}
 
       {hasSearched ? (
         <>
-          <p className="muted small">Tap a result to see details and add it to your Shows or Movies.</p>
-          {kind === "show" && (
-            <ShowRow items={showResults} onOpen={(id) => setOpenDetails({ kind: "show", tmdbId: id })} />
+          {searching && <p className="muted small">Searching...</p>}
+          {!searching && showResults.length === 0 && movieResults.length === 0 && (
+            <p className="muted">No results for "{query.trim()}".</p>
           )}
-          {kind === "movie" && (
-            <MovieRow items={movieResults} onOpen={(id) => setOpenDetails({ kind: "movie", tmdbId: id })} />
+          {showResults.length > 0 && (
+            <>
+              <h3 style={{ marginTop: 16 }}>TV Shows</h3>
+              <ShowRow items={showResults} onOpen={(id) => setOpenDetails({ kind: "show", tmdbId: id })} />
+            </>
+          )}
+          {movieResults.length > 0 && (
+            <>
+              <h3 style={{ marginTop: 20 }}>Movies</h3>
+              <MovieRow items={movieResults} onOpen={(id) => setOpenDetails({ kind: "movie", tmdbId: id })} />
+            </>
           )}
         </>
       ) : (
