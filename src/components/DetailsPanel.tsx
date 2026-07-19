@@ -287,24 +287,26 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
 
   const showsSeasonBrowser = kind === "show" && seasonNumbers !== null;
 
-  const bodyContent = details && (
-    <>
-      <div className="ratings-row">
-        {ratings === "loading" && hasOmdbKey() && <span className="muted small">Loading ratings...</span>}
-        {ratings && ratings !== "loading" && (
-          <>
-            {ratings.imdbRating && <span className="rating-pill">IMDb {ratings.imdbRating}</span>}
-            {ratings.rottenTomatoes && <span className="rating-pill">RT {ratings.rottenTomatoes}</span>}
-            {!ratings.imdbRating && !ratings.rottenTomatoes && (
-              <span className="muted small">
-                {ratings.error ? `OMDb: ${ratings.error}` : "No ratings found for this title on OMDb."}
-              </span>
-            )}
-          </>
-        )}
-        {!hasOmdbKey() && <span className="muted small">Add an OMDb key in Settings to see IMDb/RT ratings.</span>}
-      </div>
+  const ratingsRowContent = details && (
+    <div className="ratings-row">
+      {ratings === "loading" && hasOmdbKey() && <span className="muted small">Loading ratings...</span>}
+      {ratings && ratings !== "loading" && (
+        <>
+          {ratings.imdbRating && <span className="rating-pill">IMDb {ratings.imdbRating}</span>}
+          {ratings.rottenTomatoes && <span className="rating-pill">RT {ratings.rottenTomatoes}</span>}
+          {!ratings.imdbRating && !ratings.rottenTomatoes && (
+            <span className="muted small">
+              {ratings.error ? `OMDb: ${ratings.error}` : "No ratings found for this title on OMDb."}
+            </span>
+          )}
+        </>
+      )}
+      {!hasOmdbKey() && <span className="muted small">Add an OMDb key in Settings to see IMDb/RT ratings.</span>}
+    </div>
+  );
 
+  const addRemoveContent = details && (
+    <>
       {inLibrary ? (
         <>
           <p className="status-ok">
@@ -329,10 +331,24 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
       ) : (
         <button onClick={handleAdd}>{kind === "show" ? "Add to Shows" : "Add to Movies"}</button>
       )}
+    </>
+  );
 
-      <p className="overview">
-        {details.overview || (ratings !== "loading" && ratings?.plot) || "No summary available."}
-      </p>
+  const overviewContent = details && (
+    <p className="overview">
+      {details.overview || (ratings !== "loading" && ratings?.plot) || "No summary available."}
+    </p>
+  );
+
+  // Mobile keeps the original single-column composition: ratings, then the
+  // add/remove action, then overview. Desktop (below) recomposes the same
+  // three pieces into its own header/sidebar/main-column layout instead of
+  // duplicating this JSX.
+  const bodyContent = details && (
+    <>
+      {ratingsRowContent}
+      {addRemoveContent}
+      {overviewContent}
     </>
   );
 
@@ -509,28 +525,55 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className={`modal details-modal ${showsSeasonBrowser ? "details-modal-wide" : ""}`} onClick={(e) => e.stopPropagation()}>
-        <button className="close-x" onClick={onClose} aria-label="Close">
-          &times;
-        </button>
-
+      <div
+        className={`modal details-modal-desktop ${showsSeasonBrowser ? "details-modal-desktop-wide" : ""}`}
+        onClick={(e) => e.stopPropagation()}
+      >
         {error && <p className="status-error">{error}</p>}
         {!details && !error && <p className="muted">Loading...</p>}
 
         {details && (
           <>
-            <div className="details-layout">
-              {details.posterPath ? (
-                <img src={`${TMDB_IMAGE_BASE}${details.posterPath}`} alt={details.name} className="details-poster" />
+            <div className="desktop-hero">
+              {details.backdropPath ? (
+                <img
+                  src={`${TMDB_BACKDROP_BASE}${details.backdropPath}`}
+                  alt=""
+                  className="details-hero-bg-sharp"
+                />
               ) : (
-                <div className="poster-placeholder details-poster" />
+                details.posterPath && (
+                  <div
+                    className="details-hero-bg-blurred"
+                    style={{ backgroundImage: `url(${TMDB_IMAGE_BASE}${details.posterPath})` }}
+                  />
+                )
               )}
-              <div className="details-body">
+              <div className="details-hero-scrim" />
+              <button className="desktop-hero-close-x" onClick={onClose} aria-label="Close">
+                &times;
+              </button>
+            </div>
+
+            <div className="desktop-header-row">
+              {details.posterPath ? (
+                <img src={`${TMDB_IMAGE_BASE}${details.posterPath}`} alt={details.name} className="desktop-poster-card" />
+              ) : (
+                <div className="poster-placeholder desktop-poster-card" />
+              )}
+              <div className="desktop-header-text">
                 <h2>{details.name}</h2>
                 <p className="muted small">
                   <MetaLine details={details} />
                 </p>
-                {bodyContent}
+              </div>
+            </div>
+
+            <div className="desktop-two-col">
+              <div className="desktop-overview-col">{overviewContent}</div>
+              <div className="desktop-sidebar-col">
+                {ratingsRowContent}
+                {addRemoveContent}
               </div>
             </div>
 

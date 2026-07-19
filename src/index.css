@@ -592,3 +592,135 @@ hr { border: none; border-top: 1px solid var(--border); }
     padding: 8px 6px;
   }
 }
+
+/* ============================================================
+   Desktop details panel redesign. Append to the end of index.css.
+   New classes only, nothing here touches .details-modal,
+   .details-layout, .details-poster, or .close-x, which
+   EpisodeDetailsPanel still uses unchanged.
+   ============================================================ */
+
+.details-modal-desktop {
+  max-width: 760px;
+  gap: 0; /* overrides .modal's gap:12px, spacing here is deliberate via
+             margins on the pieces below (the header row's overlap math
+             specifically depends on nothing else adding extra gap) */
+}
+.details-modal-desktop.details-modal-desktop-wide {
+  max-width: 900px;
+}
+
+.desktop-hero {
+  position: relative;
+  height: 240px;
+  margin: -20px -20px 0; /* bleed to the modal's edges, cancels .modal's 20px padding */
+  overflow: hidden;
+  border-radius: 12px 12px 0 0;
+}
+
+.desktop-hero-close-x {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 2;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+}
+.desktop-hero-close-x:hover {
+  background: rgba(0, 0, 0, 0.65);
+}
+
+/* Poster card overlapping the hero's bottom edge, title/meta beside it.
+   -90px is a judgment call (overlap amount), tune it against how it
+   actually looks once you see it rendered. */
+.desktop-header-row {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 20px;
+  margin: -90px 0 0;
+}
+
+.desktop-poster-card {
+  width: 130px;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.5);
+  flex-shrink: 0;
+}
+
+.desktop-header-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 4px;
+}
+.desktop-header-text h2 {
+  font-size: 1.5rem;
+}
+
+.desktop-two-col {
+  display: flex;
+  gap: 28px;
+  align-items: flex-start;
+  margin-top: 20px;
+}
+
+.desktop-overview-col {
+  flex: 1;
+  min-width: 0;
+}
+
+.desktop-sidebar-col {
+  width: 220px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+/* Small polish items requested alongside the redesign: shadow to lift the
+   dialog off the darkened backdrop, frosted-glass separation from the page
+   content behind it, and a quick fade+scale entrance instead of an
+   instant pop-in. Applies to the desktop dialog specifically; mobile's
+   sheet already has its own drag-driven entrance and doesn't need this. */
+.modal-backdrop {
+  backdrop-filter: blur(6px);
+}
+.details-modal-desktop {
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  animation: desktop-modal-in 180ms ease-out;
+}
+@keyframes desktop-modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.danger-button:hover {
+  transform: translateY(-1px);
+}
