@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type Episode, type Show } from "../db";
 import { TMDB_IMAGE_BASE } from "../tmdb";
@@ -51,7 +51,7 @@ function EpisodeRow({ row, onOpenShow, onMarkWatched }: { row: Row; onOpenShow: 
               {String(row.nextEpisode.episodeNumber).padStart(2, "0")}
               {row.additionalCount > 0 && <span className="muted"> +{row.additionalCount}</span>}
             </p>
-            <p className="muted small">{row.nextEpisode.name}</p>
+            <p className="muted small wn-episode-name">{row.nextEpisode.name}</p>
             {isPremiere && <span className="premiere-tag">PREMIERE</span>}
           </>
         ) : (
@@ -359,15 +359,46 @@ function ComingUp({ onOpenShow }: { onOpenShow: (tmdbId: number) => void }) {
   );
 }
 
+const MTW_CARD_WIDTH = 120;
+const MTW_GAP = 14;
+
 function MoviesHome({ onViewAll }: { onViewAll: () => void }) {
   const wantToWatch = useLiveQuery(() => db.movies.filter((m) => !m.watched && m.wantsToWatch).toArray(), []);
   const [openDetails, setOpenDetails] = useState<number | null>(null);
+  const railRef = useRef<HTMLDivElement>(null);
+  const [fitCount, setFitCount] = useState(5); // sensible default before the first real measurement
+
+  // Real dynamic fit: measure the rail's actual rendered width (which
+  // itself depends on the app shell, the side rail, and the viewport, not
+  // just the viewport alone) and compute how many fixed-width cards
+  // physically fit, no scrollbar needed. Recomputes on any resize via
+  // ResizeObserver, not just on mount, so it stays correct if the window
+  // is resized or the OS display scale changes.
+  useEffect(() => {
+    const el = railRef.current;
+    if (!el) return;
+    function recompute() {
+      const width = el!.clientWidth;
+      const count = Math.max(1, Math.floor((width + MTW_GAP) / (MTW_CARD_WIDTH + MTW_GAP)));
+      setFitCount(count);
+    }
+    recompute();
+    const observer = new ResizeObserver(recompute);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   if (!wantToWatch) return <p className="muted">Loading...</p>;
 
   async function markWatched(tmdbId: number) {
     await db.movies.update(tmdbId, { watched: true, watchedAt: new Date().toISOString() });
   }
+
+  const hasMore = wantToWatch.length > fitCount;
+  // If there's overflow, the last fitting slot becomes the "View all" tile
+  // instead of a movie card, so the total tile count still exactly fills
+  // the measured width, movies + tile together, not movies alone.
+  const visible = wantToWatch.slice(0, hasMore ? Math.max(1, fitCount - 1) : fitCount);
 
   return (
     <>
@@ -376,37 +407,35 @@ function MoviesHome({ onViewAll }: { onViewAll: () => void }) {
       {wantToWatch.length === 0 ? (
         <p className="muted">Nothing on your movie watchlist right now.</p>
       ) : (
-        <>
-          {/* overflow: hidden (not auto/scroll) is deliberate: whatever
-              doesn't fit in one row is simply not shown, rather than
-              scrollable. The number of cards that fit adapts to viewport
-              width automatically via CSS, no resize observer or JS
-              measurement needed. View all is the escape hatch for
-              anything clipped. */}
-          <div className="mtw-rail">
-            {wantToWatch.map((m) => (
-              <div key={m.tmdbId} className="mtw-card">
-                {m.posterPath ? (
-                  <img
-                    className="mtw-poster"
-                    src={`${TMDB_IMAGE_BASE}${m.posterPath}`}
-                    alt={m.title}
-                    onClick={() => setOpenDetails(m.tmdbId)}
-                  />
-                ) : (
-                  <div className="poster-placeholder mtw-poster" onClick={() => setOpenDetails(m.tmdbId)} />
-                )}
-                <p className="show-name mtw-name" onClick={() => setOpenDetails(m.tmdbId)}>
-                  {m.title}
-                </p>
-                <button onClick={() => markWatched(m.tmdbId)}>Mark watched</button>
-              </div>
-            ))}
-          </div>
-          <button className="view-all-link" onClick={onViewAll}>
-            View all &rsaquo;
-          </button>
-        </>
+        <div className="mtw-rail" ref={railRef}>
+          {visible.map((m) => (
+            <div key={m.tmdbId} className="mtw-card">
+              {m.posterPath ? (
+                <img
+                  className="mtw-poster"
+                  src={`${TMDB_IMAGE_BASE}${m.posterPath}`}
+                  alt={m.title}
+                  onClick={() => setOpenDetails(m.tmdbId)}
+                />
+              ) : (
+                <div className="poster-placeholder mtw-poster" onClick={() => setOpenDetails(m.tmdbId)} />
+              )}
+              <p className="show-name mtw-name" onClick={() => setOpenDetails(m.tmdbId)}>
+                {m.title}
+              </p>
+              <button onClick={() => markWatched(m.tmdbId)}>Mark watched</button>
+            </div>
+          ))}
+          {hasMore && (
+            <div className="mtw-card">
+              <button type="button" className="mtw-view-all-tile" onClick={onViewAll} aria-label="View all movies to watch">
+                <span className="mtw-view-all-count">+{wantToWatch.length - visible.length}</span>
+                <span>View all</span>
+                <span aria-hidden="true">&rsaquo;</span>
+              </button>
+            </div>
+          )}
+        </div>
       )}
       {openDetails !== null && <DetailsPanel kind="movie" tmdbId={openDetails} onClose={() => setOpenDetails(null)} />}
     </>

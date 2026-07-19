@@ -181,11 +181,9 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
     }
   }
 
-  const [catchUpOffer, setCatchUpOffer] = useState<
-    | { kind: "episodes"; episodes: Episode[]; count: number }
-    | { kind: "seasons"; seasonNumbers: number[] }
-    | null
-  >(null);
+  const [catchUpOffer, setCatchUpOffer] = useState<{ episodesInSeason: Episode[]; earlierSeasonNumbers: number[] } | null>(
+    null
+  );
 
   async function markEpisodesWatched(eps: Episode[]) {
     await db.watchedEpisodes.bulkPut(
@@ -201,18 +199,44 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
     await refreshWatchedAndEpisodes();
   }
 
+  /**
+   * Which season numbers strictly before `beforeSeason` still need
+   * catching up. A season already fully watched (verifiable because it's
+   * cached) is excluded, so accepting an already-caught-up show doesn't
+   * nag about seasons you've already marked. A season that's never been
+   * opened/cached at all is included rather than skipped: we can't verify
+   * it's already watched, and the common real case (per the exact
+   * scenario this was reported against) is jumping straight to marking an
+   * episode deep in the series without ever having opened Season 1, so
+   * silently excluding uncached seasons would recreate the original bug.
+   */
+  function earlierSeasonsNeedingCatchUp(beforeSeason: number): number[] {
+    return (seasonNumbers ?? []).filter((n) => {
+      if (n >= beforeSeason) return false;
+      const eps = episodesBySeason.get(n);
+      if (!eps || eps.length === 0) return true;
+      return eps.some((e) => !watchedKeys.has(e.key));
+    });
+  }
+
   async function toggleEpisodeWatched(ep: Episode) {
     if (!inLibrary) return;
     if (watchedKeys.has(ep.key)) {
       await db.watchedEpisodes.delete(ep.key);
+      await refreshWatchedAndEpisodes();
       setCatchUpOffer(null);
       return;
     }
     await markEpisodesWatched([ep]);
 
     const seasonEps = episodesBySeason.get(ep.seasonNumber) ?? [];
-    const earlierUnwatched = seasonEps.filter((e) => e.episodeNumber < ep.episodeNumber && !watchedKeys.has(e.key));
-    setCatchUpOffer(earlierUnwatched.length > 0 ? { kind: "episodes", episodes: earlierUnwatched, count: earlierUnwatched.length } : null);
+    const episodesInSeason = seasonEps.filter((e) => e.episodeNumber < ep.episodeNumber && !watchedKeys.has(e.key));
+    const earlierSeasonNumbers = earlierSeasonsNeedingCatchUp(ep.seasonNumber);
+    setCatchUpOffer(
+      episodesInSeason.length > 0 || earlierSeasonNumbers.length > 0
+        ? { episodesInSeason, earlierSeasonNumbers }
+        : null
+    );
   }
 
   async function toggleSeasonWatched(seasonEpisodes: Episode[], markWatched: boolean) {
@@ -220,27 +244,26 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
     if (markWatched) {
       await markEpisodesWatched(seasonEpisodes);
       const thisSeason = seasonEpisodes[0]?.seasonNumber;
-      const earlierSeasons = seasonNumbers?.filter((n) => n < thisSeason) ?? [];
-      setCatchUpOffer(earlierSeasons.length > 0 ? { kind: "seasons", seasonNumbers: earlierSeasons } : null);
+      const earlierSeasonNumbers = thisSeason === undefined ? [] : earlierSeasonsNeedingCatchUp(thisSeason);
+      setCatchUpOffer(earlierSeasonNumbers.length > 0 ? { episodesInSeason: [], earlierSeasonNumbers } : null);
     } else {
       await db.watchedEpisodes.bulkDelete(seasonEpisodes.map((ep) => ep.key));
+      await refreshWatchedAndEpisodes();
       setCatchUpOffer(null);
     }
   }
 
   async function acceptCatchUp() {
     if (!catchUpOffer) return;
-    if (catchUpOffer.kind === "episodes") {
-      await markEpisodesWatched(catchUpOffer.episodes);
-    } else {
-      for (const seasonNumber of catchUpOffer.seasonNumbers) {
-        await ensureSeasonCached(tmdbId, seasonNumber);
-      }
-      await refreshWatchedAndEpisodes();
-      const freshEpisodes = await db.episodes.where("showId").equals(tmdbId).toArray();
-      const toMark = freshEpisodes.filter((e) => catchUpOffer.seasonNumbers.includes(e.seasonNumber));
-      await markEpisodesWatched(toMark);
+    for (const seasonNumber of catchUpOffer.earlierSeasonNumbers) {
+      await ensureSeasonCached(tmdbId, seasonNumber);
     }
+    const freshEpisodes =
+      catchUpOffer.earlierSeasonNumbers.length > 0
+        ? await db.episodes.where("showId").equals(tmdbId).toArray()
+        : [];
+    const fromEarlierSeasons = freshEpisodes.filter((e) => catchUpOffer.earlierSeasonNumbers.includes(e.seasonNumber));
+    await markEpisodesWatched([...catchUpOffer.episodesInSeason, ...fromEarlierSeasons]);
     setCatchUpOffer(null);
   }
 
@@ -378,9 +401,13 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
       {catchUpOffer && (
         <div className="catch-up-offer">
           <span>
-            {catchUpOffer.kind === "episodes"
-              ? `Also mark the ${catchUpOffer.count} episode${catchUpOffer.count === 1 ? "" : "s"} before this one (in this season) as watched?`
-              : `Also mark all ${catchUpOffer.seasonNumbers.length} earlier season${catchUpOffer.seasonNumbers.length === 1 ? "" : "s"} as fully watched?`}
+            Also mark{" "}
+            {catchUpOffer.episodesInSeason.length > 0 &&
+              `the ${catchUpOffer.episodesInSeason.length} episode${catchUpOffer.episodesInSeason.length === 1 ? "" : "s"} before this one in this season`}
+            {catchUpOffer.episodesInSeason.length > 0 && catchUpOffer.earlierSeasonNumbers.length > 0 && " and "}
+            {catchUpOffer.earlierSeasonNumbers.length > 0 &&
+              `${catchUpOffer.earlierSeasonNumbers.length} earlier season${catchUpOffer.earlierSeasonNumbers.length === 1 ? "" : "s"}`}
+            {" "}as watched?
           </span>
           <div className="field-row">
             <button onClick={acceptCatchUp}>Yes, catch up</button>

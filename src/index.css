@@ -23,7 +23,7 @@ body {
 
 #root { min-height: 100vh; }
 
-.app-shell { max-width: 1280px; margin: 0 auto; padding: 0 24px 60px; }
+.app-shell { max-width: 1600px; margin: 0 auto; padding: 0 32px 60px; }
 
 .app-header {
   display: flex;
@@ -362,7 +362,8 @@ hr { border: none; border-top: 1px solid var(--border); }
   display: inline-block; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.02em;
   text-transform: uppercase; color: var(--text); cursor: pointer; margin-bottom: 4px;
   background: var(--surface-raised); border: 1px solid var(--border); border-radius: 999px;
-  padding: 2px 10px;
+  padding: 2px 10px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  vertical-align: bottom;
 }
 .wn-episode-line { font-weight: 700; font-size: 1rem; margin: 4px 0 2px; font-family: var(--font-mono); }
 .premiere-tag {
@@ -380,6 +381,7 @@ hr { border: none; border-top: 1px solid var(--border); }
 .catch-up-offer {
   background: var(--surface-raised); border: 1px solid var(--accent-dim); border-radius: 10px;
   padding: 12px 14px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 8px; font-size: 0.9rem;
+  position: sticky; top: 0; z-index: 3;
 }
 
 /* Season section restyle: clearer separation, bigger touch targets */
@@ -670,7 +672,7 @@ hr { border: none; border-top: 1px solid var(--border); }
 
 @media (max-width: 640px) {
   .filters-row input[type="text"] {
-    flex: 1 1 100%; /* search gets its own full-width row */
+    flex: 1 1 auto; /* search gets its own full-width row */
     min-width: 0;
   }
 
@@ -1002,20 +1004,28 @@ details[open] > summary::after { transform: rotate(90deg); }
 }
 .section-title:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
 
-/* Desktop/wide viewports: Continue Watching becomes a horizontal rail,
-   matching the approved mockup, each card a fixed width instead of
-   stretching full-width. Mobile keeps the original vertical stack
-   entirely unchanged below 700px, that layout was already correct there. */
+/* Desktop/wide viewports: Continue Watching cards wrap onto new rows as
+   needed, matching the mobile card design, but each card keeps a
+   comfortable fixed-ish width instead of stretching to fill all
+   available space (that stretching was leaving a lot of visibly empty
+   card interior on wide screens). Long episode names truncate instead. */
 @media (min-width: 700px) {
   .watch-next-list {
     flex-direction: row;
-    overflow-x: auto;
-    padding-bottom: 6px;
+    flex-wrap: wrap;
     gap: 14px;
   }
   .watch-next-row {
-    flex: 0 0 240px;
+    flex: 0 1 380px;
+    max-width: 380px;
   }
+}
+
+.wn-episode-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .coming-up-cols {
@@ -1081,17 +1091,23 @@ details[open] > summary::after { transform: rotate(90deg); }
 }
 .mtw-card button { width: 100%; font-size: 0.78rem; padding: 6px 0; }
 
-.view-all-link {
-  display: inline-block;
-  margin-top: 10px;
-  color: var(--accent);
-  background: none;
-  border: none;
-  padding: 0;
+.mtw-view-all-tile {
+  width: 100%;
+  aspect-ratio: 2/3;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   font-size: 0.85rem;
   font-weight: 600;
 }
-.view-all-link:hover { border-color: transparent; text-decoration: underline; }
+.mtw-view-all-tile:hover { border-color: var(--accent); color: var(--accent); }
+.mtw-view-all-count { font-size: 1.3rem; font-weight: 700; }
 
 /* ============================================================
    Segmented control (status filter), genre chips, and compact
