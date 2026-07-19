@@ -1207,3 +1207,43 @@ details[open] > summary::after { transform: rotate(90deg); }
   font-size: 0.9rem;
 }
 .backup-nudge-dismiss:hover { color: var(--text); }
+
+
+/* ---- First-run wizard (Phase 1 onboarding) -------------------------------- */
+
+.wizard-backdrop { z-index: 30; } /* above details sheets and modals */
+
+.wizard { max-width: 520px; gap: 14px; }
+
+.wizard-step-label {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.wizard-howto { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+
+.wizard-summary { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+
+.wizard-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.wizard-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.wizard-primary:disabled { opacity: 0.55; cursor: default; }
+
+.wizard input[type="text"] { width: 100%; }
+
+.wizard a { color: var(--accent); }

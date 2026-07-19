@@ -12,14 +12,33 @@ export function hasOmdbKey(): boolean {
   return !!getOmdbKey();
 }
 
+// Distinguishes the reasons a key test can fail, because they need
+// different user advice: a typo'd/unactivated key vs a key that already
+// burned its 1,000/day quota (which is proof the key itself is VALID) vs
+// OMDb being unreachable. OMDb reports these in the JSON "Error" field
+// with Response="False", not via distinct HTTP statuses alone.
+export type OmdbKeyCheckResult = "valid" | "invalid" | "rate-limited" | "network-error";
+
+export async function checkOmdbKey(key: string): Promise<OmdbKeyCheckResult> {
+  try {
+    const url = new URL(OMDB_BASE);
+    url.searchParams.set("apikey", key);
+    url.searchParams.set("t", "Inception"); // any well-known title, just to validate the key
+    const res = await fetch(url.toString());
+    const data = await res.json().catch(() => null);
+    if (data?.Response === "True") return "valid";
+    const err = String(data?.Error ?? "").toLowerCase();
+    if (err.includes("limit")) return "rate-limited"; // "Request limit reached!"
+    if (err.includes("invalid api key")) return "invalid";
+    if (res.status >= 500) return "network-error";
+    return "invalid";
+  } catch {
+    return "network-error";
+  }
+}
+
 export async function verifyOmdbKey(key: string): Promise<boolean> {
-  const url = new URL(OMDB_BASE);
-  url.searchParams.set("apikey", key);
-  url.searchParams.set("t", "Inception"); // any well-known title, just to validate the key
-  const res = await fetch(url.toString());
-  if (!res.ok) return false;
-  const data = await res.json();
-  return data.Response === "True";
+  return (await checkOmdbKey(key)) === "valid";
 }
 
 export interface OmdbRatings {
