@@ -1,7 +1,11 @@
 const OMDB_BASE = "https://www.omdbapi.com/";
 
+// Exported so Settings and the backup/restore code reference the same
+// storage key instead of re-typing the literal.
+export const OMDB_API_KEY_STORAGE = "omdb_api_key";
+
 function getOmdbKey(): string | null {
-  return localStorage.getItem("omdb_api_key");
+  return localStorage.getItem(OMDB_API_KEY_STORAGE);
 }
 
 export function hasOmdbKey(): boolean {

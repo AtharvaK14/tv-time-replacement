@@ -1,7 +1,24 @@
 import { useState, useEffect } from "react";
-import { verifyApiKey } from "../tmdb";
-import { verifyOmdbKey } from "../omdb";
+import { useLiveQuery } from "dexie-react-hooks";
+import { verifyApiKey, TMDB_API_KEY_STORAGE } from "../tmdb";
+import { verifyOmdbKey, OMDB_API_KEY_STORAGE } from "../omdb";
 import { db } from "../db";
+import {
+  exportAndDownloadBackup,
+  validateBackup,
+  restoreBackup,
+  tableCounts,
+  type ValidatedBackup,
+  type ExportResult,
+  type RestoreResult,
+  type RestoreMode,
+} from "../lib/backup";
+import {
+  getStoredPersistStatus,
+  getStorageEstimate,
+  getLastBackupAt,
+  API_KEYS_CHANGED_EVENT,
+} from "../lib/persistence";
 import ImportWizard from "./ImportWizard";
 import Diagnostics from "./Diagnostics";
 
@@ -16,23 +33,27 @@ function ApiKeys() {
   const [omdbVisible, setOmdbVisible] = useState(false);
 
   useEffect(() => {
-    const savedTmdb = localStorage.getItem("tmdb_api_key");
-    if (savedTmdb) {
-      setTmdbKey(savedTmdb);
-      setTmdbStatus("valid");
+    // Re-read on the restore event too: this component stays mounted inside
+    // its <details> while a backup restore rewrites localStorage, so mount-
+    // time state alone would go stale.
+    function loadSavedKeys() {
+      const savedTmdb = localStorage.getItem(TMDB_API_KEY_STORAGE);
+      setTmdbKey(savedTmdb ?? "");
+      setTmdbStatus(savedTmdb ? "valid" : "idle");
+      const savedOmdb = localStorage.getItem(OMDB_API_KEY_STORAGE);
+      setOmdbKey(savedOmdb ?? "");
+      setOmdbStatus(savedOmdb ? "valid" : "idle");
     }
-    const savedOmdb = localStorage.getItem("omdb_api_key");
-    if (savedOmdb) {
-      setOmdbKey(savedOmdb);
-      setOmdbStatus("valid");
-    }
+    loadSavedKeys();
+    window.addEventListener(API_KEYS_CHANGED_EVENT, loadSavedKeys);
+    return () => window.removeEventListener(API_KEYS_CHANGED_EVENT, loadSavedKeys);
   }, []);
 
   async function saveTmdb() {
     setTmdbStatus("checking");
     const ok = await verifyApiKey(tmdbKey.trim());
     if (ok) {
-      localStorage.setItem("tmdb_api_key", tmdbKey.trim());
+      localStorage.setItem(TMDB_API_KEY_STORAGE, tmdbKey.trim());
       setTmdbStatus("valid");
     } else {
       setTmdbStatus("invalid");
@@ -43,7 +64,7 @@ function ApiKeys() {
     setOmdbStatus("checking");
     const ok = await verifyOmdbKey(omdbKey.trim());
     if (ok) {
-      localStorage.setItem("omdb_api_key", omdbKey.trim());
+      localStorage.setItem(OMDB_API_KEY_STORAGE, omdbKey.trim());
       setOmdbStatus("valid");
     } else {
       setOmdbStatus("invalid");
@@ -119,6 +140,225 @@ function ApiKeys() {
   );
 }
 
+const PERSIST_STATUS_COPY: Record<string, string> = {
+  granted:
+    "Protected: the system agreed not to auto-clear this app's data under storage pressure. That still doesn't survive \"Clear data\" or uninstalling, so keep backups.",
+  denied:
+    "Not guaranteed: the system may clear this app's data if device storage runs low. Browsers usually grant protection after regular use; until then, export backups.",
+  unsupported:
+    "This browser doesn't support persistent-storage requests, so data may be cleared under storage pressure. Export backups regularly.",
+};
+
+function formatCounts(counts: Record<string, number>): string {
+  return (
+    `${counts.shows.toLocaleString()} shows · ${counts.movies.toLocaleString()} movies · ` +
+    `${counts.watchedEpisodes.toLocaleString()} watched episodes · ${counts.episodes.toLocaleString()} cached episodes · ` +
+    `${counts.titleMatches.toLocaleString()} import matches`
+  );
+}
+
+function keyOutcomeLabel(outcome: "restored" | "kept-existing" | "absent"): string {
+  if (outcome === "restored") return "restored";
+  if (outcome === "kept-existing") return "kept your existing key";
+  return "not in this backup";
+}
+
+function BackupRestore() {
+  const persistStatus = getStoredPersistStatus();
+  const [estimate, setEstimate] = useState<{ usageMB: number; quotaMB: number } | null>(null);
+  const [lastBackup, setLastBackup] = useState<string | null>(() => getLastBackupAt());
+
+  const [exporting, setExporting] = useState(false);
+  const [exportResult, setExportResult] = useState<ExportResult | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const [pending, setPending] = useState<ValidatedBackup | null>(null);
+  const [confirmingReplace, setConfirmingReplace] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [restoreResult, setRestoreResult] = useState<RestoreResult | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+
+  // Whether the merge-or-replace question is even needed: restoring into an
+  // empty database has nothing to destroy, so it gets a single button.
+  const hasExistingData = useLiveQuery(
+    async () =>
+      (await db.shows.count()) > 0 || (await db.movies.count()) > 0 || (await db.watchedEpisodes.count()) > 0,
+    []
+  );
+
+  useEffect(() => {
+    getStorageEstimate().then(setEstimate);
+  }, []);
+
+  async function handleExport() {
+    setExporting(true);
+    setExportError(null);
+    setExportResult(null);
+    try {
+      const res = await exportAndDownloadBackup();
+      setExportResult(res);
+      setLastBackup(getLastBackupAt());
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handleFileChosen(file: File | null) {
+    setPending(null);
+    setConfirmingReplace(false);
+    setRestoreResult(null);
+    setRestoreError(null);
+    if (!file) return;
+    try {
+      const text = await file.text();
+      let raw: unknown;
+      try {
+        raw = JSON.parse(text);
+      } catch {
+        throw new Error("That file isn't valid JSON. Choose a backup file exported by this app.");
+      }
+      setPending(validateBackup(raw));
+    } catch (e) {
+      setRestoreError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function handleRestore(mode: RestoreMode) {
+    if (!pending) return;
+    setRestoring(true);
+    setRestoreError(null);
+    try {
+      const res = await restoreBackup(pending.backup, mode);
+      setRestoreResult(res);
+      setPending(null);
+      setConfirmingReplace(false);
+      setLastBackup(getLastBackupAt());
+    } catch (e) {
+      setRestoreError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRestoring(false);
+    }
+  }
+
+  return (
+    <div className="panel">
+      <div className="settings-block">
+        <h3>Storage status</h3>
+        <p className="muted small">
+          {persistStatus ? PERSIST_STATUS_COPY[persistStatus] : "Checking storage protection..."}
+          {estimate && ` Currently using ${estimate.usageMB.toFixed(1)} MB of local storage.`}
+        </p>
+        <p className="muted small">
+          Last backup: {lastBackup ? new Date(lastBackup).toLocaleString() : "never"}
+        </p>
+      </div>
+
+      <div className="settings-block">
+        <h3>Export backup</h3>
+        <p className="muted small">
+          Saves your entire library (shows, movies, watch history, import matches) plus your API keys to a single
+          JSON file. Keep it somewhere outside this device, e.g. your cloud drive.
+        </p>
+        <button onClick={handleExport} disabled={exporting}>
+          {exporting ? "Exporting..." : "Export backup file"}
+        </button>
+        {exportResult && (
+          <p className="status-ok">
+            Saved {exportResult.filename}: {formatCounts(exportResult.counts)}.
+          </p>
+        )}
+        {exportError && <p className="status-error">Export failed: {exportError}</p>}
+      </div>
+
+      <div className="settings-block">
+        <h3>Restore from backup</h3>
+        <div className="field-row">
+          <label className="file-label">
+            Backup JSON file
+            <input
+              type="file"
+              accept=".json,application/json"
+              onChange={(e) => handleFileChosen(e.target.files?.[0] ?? null)}
+            />
+          </label>
+        </div>
+
+        {restoreError && <p className="status-error">{restoreError}</p>}
+
+        {pending && (
+          <div className="settings-block">
+            <p>
+              Backup from {new Date(pending.backup.exportedAt).toLocaleString()}:{" "}
+              {formatCounts(tableCounts(pending.backup))}.
+            </p>
+            <p className="muted small">
+              API keys in file: TMDB {pending.backup.apiKeys.tmdb ? "yes" : "no"} · OMDb{" "}
+              {pending.backup.apiKeys.omdb ? "yes" : "no"}
+            </p>
+            {pending.warnings.map((w) => (
+              <p key={w} className="muted small">
+                ⚠ {w}
+              </p>
+            ))}
+
+            {hasExistingData === true && !confirmingReplace && (
+              <>
+                <p>You already have data in this app. Choose how to restore:</p>
+                <div className="field-row">
+                  <button onClick={() => handleRestore("merge")} disabled={restoring}>
+                    {restoring ? "Restoring..." : "Merge into existing"}
+                  </button>
+                  <button className="danger-button" onClick={() => setConfirmingReplace(true)} disabled={restoring}>
+                    Replace everything...
+                  </button>
+                </div>
+                <p className="muted small">
+                  Merge adds and overwrites items from the file by ID and keeps everything else you have. Replace
+                  deletes all current data first, then loads the file exactly.
+                </p>
+              </>
+            )}
+
+            {hasExistingData === true && confirmingReplace && (
+              <div className="settings-block">
+                <p className="status-error">
+                  This permanently deletes ALL current shows, movies, and watch history first, then loads the
+                  file. There is no undo.
+                </p>
+                <div className="field-row">
+                  <button className="danger-button" onClick={() => handleRestore("replace")} disabled={restoring}>
+                    {restoring ? "Restoring..." : "Yes, replace everything"}
+                  </button>
+                  <button onClick={() => setConfirmingReplace(false)} disabled={restoring}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {hasExistingData === false && (
+              <div className="field-row">
+                <button onClick={() => handleRestore("replace")} disabled={restoring}>
+                  {restoring ? "Restoring..." : "Restore backup"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {restoreResult && (
+          <p className="status-ok">
+            Restored {formatCounts(restoreResult.counts)}. API keys: TMDB {keyOutcomeLabel(restoreResult.keys.tmdb)},
+            OMDb {keyOutcomeLabel(restoreResult.keys.omdb)}.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ResetData() {
   const [confirming, setConfirming] = useState(false);
   const [done, setDone] = useState(false);
@@ -172,6 +412,18 @@ export default function Settings() {
       <h2>Settings</h2>
 
       <details open>
+        <summary>
+          <span className="settings-row-text">
+            <h3>Backup &amp; Restore</h3>
+            <p className="muted small settings-row-sub">Export your library to a file, restore it anywhere</p>
+          </span>
+        </summary>
+        <div style={{ marginTop: 14 }}>
+          <BackupRestore />
+        </div>
+      </details>
+
+      <details>
         <summary>
           <span className="settings-row-text">
             <h3>Import from TV Time</h3>

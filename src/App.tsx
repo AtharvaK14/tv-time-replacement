@@ -1,9 +1,19 @@
-import { useState, type ComponentType } from "react";
+import { useState, useEffect, type ComponentType } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
+import { db } from "./db";
 import Home from "./pages/Home";
 import Library from "./pages/Library";
 import Movies from "./pages/Movies";
 import AddTitle from "./pages/AddTitle";
 import Settings from "./pages/Settings";
+import BackupNudge from "./components/BackupNudge";
+import {
+  initStoragePersistence,
+  shouldShowBackupNudge,
+  snoozeBackupNudge,
+  BACKUP_COMPLETED_EVENT,
+  type PersistStatus,
+} from "./lib/persistence";
 import { HomeIcon, ShowsIcon, MoviesIcon, DiscoverIcon, SettingsIcon, type IconProps } from "./components/icons";
 import "./index.css";
 
@@ -30,6 +40,35 @@ const TAB_ICONS: Record<Tab, ComponentType<IconProps>> = {
 function App() {
   const [tab, setTab] = useState<Tab>("home");
   const [moviesInitialFilter, setMoviesInitialFilter] = useState<"wantToWatch" | null>(null);
+
+  // Phase 0 durability: ask the browser/WebView for persistent storage once
+  // per launch, and re-evaluate the backup nudge whenever a backup or
+  // restore completes (the banner should clear immediately, not on reload).
+  const [persistStatus, setPersistStatus] = useState<PersistStatus | null>(null);
+  const [, forceNudgeRecheck] = useState(0);
+
+  useEffect(() => {
+    initStoragePersistence().then(setPersistStatus);
+    const onBackupCompleted = () => forceNudgeRecheck((t) => t + 1);
+    window.addEventListener(BACKUP_COMPLETED_EVENT, onBackupCompleted);
+    return () => window.removeEventListener(BACKUP_COMPLETED_EVENT, onBackupCompleted);
+  }, []);
+
+  // Only nudge when there's actually a library to lose.
+  const hasLibraryData = useLiveQuery(
+    async () => (await db.shows.count()) > 0 || (await db.movies.count()) > 0,
+    []
+  );
+
+  // Recomputed every render on purpose (it's a couple of localStorage
+  // reads): its inputs change outside React, so the force-recheck state
+  // above triggers the re-render when a backup completes or is snoozed.
+  const nudge = shouldShowBackupNudge(persistStatus, hasLibraryData ?? false);
+
+  function dismissNudge() {
+    snoozeBackupNudge();
+    forceNudgeRecheck((t) => t + 1);
+  }
 
   function viewAllWantToWatchMovies() {
     setMoviesInitialFilter("wantToWatch");
@@ -60,6 +99,10 @@ function App() {
         <header className="app-header">
           <span className="brand">WatchTime</span>
         </header>
+
+        {nudge.show && nudge.reason && (
+          <BackupNudge reason={nudge.reason} onBackUp={() => setTab("settings")} onDismiss={dismissNudge} />
+        )}
 
         <main>
           {tab === "home" && <Home onViewAllMovies={viewAllWantToWatchMovies} />}
