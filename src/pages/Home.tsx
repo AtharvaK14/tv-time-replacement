@@ -4,6 +4,7 @@ import { db, type Episode, type Show } from "../db";
 import { TMDB_IMAGE_BASE } from "../tmdb";
 import { ensureEpisodesCached, findNextUnwatched, countAdditionalUnwatched, findNextUpcoming } from "../lib/episodeSync";
 import { daysSince, STALE_DAYS_THRESHOLD } from "../lib/showStatus";
+import { useIsMobile } from "../lib/useIsMobile";
 import DetailsPanel from "../components/DetailsPanel";
 
 interface Row {
@@ -361,19 +362,38 @@ function ComingUp({ onOpenShow }: { onOpenShow: (tmdbId: number) => void }) {
 
 const MTW_CARD_WIDTH = 120;
 const MTW_GAP = 14;
+// Mobile doesn't measure: it shows a capped, horizontally scrollable strip
+// of up to 5 movies, with the view-all tile as the 6th card.
+const MTW_MOBILE_MAX = 5;
 
 function MoviesHome({ onViewAll }: { onViewAll: () => void }) {
   const wantToWatch = useLiveQuery(() => db.movies.filter((m) => !m.watched && m.wantsToWatch).toArray(), []);
   const [openDetails, setOpenDetails] = useState<number | null>(null);
   const railRef = useRef<HTMLDivElement>(null);
+  const isMobile = useIsMobile();
   const [fitCount, setFitCount] = useState(5); // sensible default before the first real measurement
+
+  // Most recently added first, the same comparator as the Movies page's
+  // "Recently added" sort: movies from before addedAt existed have it
+  // undefined and deliberately sort as oldest.
+  const sorted = useMemo(
+    () =>
+      wantToWatch ? [...wantToWatch].sort((a, b) => (b.addedAt ?? "").localeCompare(a.addedAt ?? "")) : undefined,
+    [wantToWatch]
+  );
 
   // Real dynamic fit: measure the rail's actual rendered width (which
   // itself depends on the app shell, the side rail, and the viewport, not
   // just the viewport alone) and compute how many fixed-width cards
   // physically fit, no scrollbar needed. Recomputes on any resize via
-  // ResizeObserver, not just on mount, so it stays correct if the window
-  // is resized or the OS display scale changes.
+  // ResizeObserver.
+  //
+  // The dependency below is the fix for the rail never filling wide
+  // screens: the rail div only exists in the DOM once the query has
+  // resolved AND is non-empty. With [] deps this effect ran exactly once,
+  // on mount, against a still-null ref, so the observer never attached
+  // and fitCount sat at its default forever regardless of window width.
+  const railRendered = (sorted?.length ?? 0) > 0;
   useEffect(() => {
     const el = railRef.current;
     if (!el) return;
@@ -386,25 +406,28 @@ function MoviesHome({ onViewAll }: { onViewAll: () => void }) {
     const observer = new ResizeObserver(recompute);
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [railRendered]);
 
-  if (!wantToWatch) return <p className="muted">Loading...</p>;
+  if (!sorted) return <p className="muted">Loading...</p>;
 
   async function markWatched(tmdbId: number) {
     await db.movies.update(tmdbId, { watched: true, watchedAt: new Date().toISOString() });
   }
 
-  const hasMore = wantToWatch.length > fitCount;
-  // If there's overflow, the last fitting slot becomes the "View all" tile
-  // instead of a movie card, so the total tile count still exactly fills
-  // the measured width, movies + tile together, not movies alone.
-  const visible = wantToWatch.slice(0, hasMore ? Math.max(1, fitCount - 1) : fitCount);
+  const hasMore = sorted.length > (isMobile ? MTW_MOBILE_MAX : fitCount);
+  // Desktop: if there's overflow, the last fitting slot becomes the "View
+  // all" tile instead of a movie card, so movies + tile together still
+  // exactly fill the measured width. Mobile: fixed cap of 5 movies, the
+  // view-all tile rides along as a 6th card in the scrollable strip.
+  const visible = isMobile
+    ? sorted.slice(0, MTW_MOBILE_MAX)
+    : sorted.slice(0, hasMore ? Math.max(1, fitCount - 1) : fitCount);
 
   return (
     <>
       <h3 className="section-title">Movies to Watch</h3>
 
-      {wantToWatch.length === 0 ? (
+      {sorted.length === 0 ? (
         <p className="muted">Nothing on your movie watchlist right now.</p>
       ) : (
         <div className="mtw-rail" ref={railRef}>
@@ -420,7 +443,10 @@ function MoviesHome({ onViewAll }: { onViewAll: () => void }) {
               ) : (
                 <div className="poster-placeholder mtw-poster" onClick={() => setOpenDetails(m.tmdbId)} />
               )}
-              <p className="show-name mtw-name" onClick={() => setOpenDetails(m.tmdbId)}>
+              {/* Single-line ellipsis title (see .mtw-name), so the button
+                  below sits at the same height on every card; the full
+                  title is still available as a hover tooltip. */}
+              <p className="show-name mtw-name" title={m.title} onClick={() => setOpenDetails(m.tmdbId)}>
                 {m.title}
               </p>
               <button onClick={() => markWatched(m.tmdbId)}>Mark watched</button>
@@ -429,7 +455,7 @@ function MoviesHome({ onViewAll }: { onViewAll: () => void }) {
           {hasMore && (
             <div className="mtw-card">
               <button type="button" className="mtw-view-all-tile" onClick={onViewAll} aria-label="View all movies to watch">
-                <span className="mtw-view-all-count">+{wantToWatch.length - visible.length}</span>
+                <span className="mtw-view-all-count">+{sorted.length - visible.length}</span>
                 <span>View all</span>
                 <span aria-hidden="true">&rsaquo;</span>
               </button>
