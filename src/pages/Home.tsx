@@ -1,34 +1,61 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db, type Episode, type Show } from "../db";
+import { db, type Episode } from "../db";
 import { TMDB_IMAGE_BASE } from "../tmdb";
 import { ensureEpisodesCached, findNextUnwatched, countAdditionalUnwatched, findNextUpcoming } from "../lib/episodeSync";
-import { daysSince, STALE_DAYS_THRESHOLD } from "../lib/showStatus";
+import { daysSince, getStaleDaysThreshold } from "../lib/showStatus";
+import { markNextEpisodeWatched, lastProgressionAt } from "../lib/watchEvents";
+import { useIsMobile } from "../lib/useIsMobile";
 import DetailsPanel from "../components/DetailsPanel";
+
+type Category = "watch-next" | "stale" | "not-started";
 
 interface Row {
   showId: number;
   showName: string;
   posterPath: string | null;
-  nextEpisode: Episode | null; // null when TV Time confirms there's more to watch but we couldn't line it up against TMDB's episode list (numbering mismatch)
+  nextEpisode: Episode | null; // for not-started: the first episode to start with; for in-progress: the next unseen one. Null when nothing is cached yet.
   additionalCount: number; // the "+N" badge
-  lastWatchedAt: string | null;
+  lastProgressedAt: string | null; // most recent first-watch of an unseen episode; drives the split AND the sort
+  addedAt: string; // for ordering the "Haven't Yet Started" list (recently added first)
+  category: Category;
 }
 
 /**
- * A show belongs in "has more to watch" if TV Time's own status says so
- * (authoritative at import time), OR if live data in this app says so.
- * Deliberately an OR, not "trust tvTimeStatus exclusively": tvTimeStatus is
- * a snapshot from whenever you last imported, it goes stale the moment you
- * mark anything watched or unwatched directly in this app afterward. Only
- * trusting the imported field meant a show imported as "not_started_yet" or
- * "up_to_date" could never appear here again no matter what you did in the
- * app, which was the actual bug behind episodes you'd just marked watched
- * not showing their follow-up here.
+ * The three mutually-exclusive Home categories, driven purely by real watch
+ * data (not the imported tvTimeStatus snapshot, which goes stale the moment
+ * you watch anything in-app):
+ *
+ * - "not-started": zero watch activity ever. A show added to the library
+ *   but never begun. Its own section so a long watchlist doesn't crowd out
+ *   shows you're actually mid-way through.
+ * - "watch-next": at least one episode watched AND a next UNSEEN released
+ *   episode exists AND the last PROGRESSION is within the threshold. In
+ *   progress and active.
+ * - "stale": same as watch-next but the last progression is older than the
+ *   threshold. Started, then genuinely dropped for a while.
+ * - null (not shown): watched at least one episode but no next unseen
+ *   episode remains, i.e. caught up / finished. Rewatching an old episode
+ *   updates history/time/recency but must NEVER resurface the show here:
+ *   "next" is always the next UNSEEN episode in original progression, never
+ *   "the episode after a rewatch". A finished series simply stays off all
+ *   three lists.
+ *
+ * CRITICAL: the split uses last PROGRESSION (the most recent first-watch of
+ * a previously-unseen episode), NOT last activity. Rewatching already-seen
+ * episodes of a stalled show must not drag it back into Watch Next — only
+ * watching the next NEW episode counts as resuming. lastProgressedAt is
+ * max(WatchedEpisode.watchedAt), which a rewatch never changes.
+ *
+ * The tvTimeStatus === "continuing" clause was deliberately dropped: it
+ * could force a finished show (all cached episodes watched, next === null)
+ * back onto Watch Next via a stale imported flag, which is exactly the
+ * rewatch-resurfacing this spec forbids.
  */
-function hasMoreToWatch(show: Show, computedNext: Episode | null, watchedCount: number): boolean {
-  const liveSignal = computedNext !== null && watchedCount > 0;
-  return show.tvTimeStatus === "continuing" || liveSignal;
+function categorize(next: Episode | null, watchedCount: number, lastProgressedAt: string | null, threshold: number): Category | null {
+  if (watchedCount === 0) return "not-started";
+  if (next === null) return null; // caught up / finished; rewatches don't bring it back
+  return (daysSince(lastProgressedAt) ?? 0) < threshold ? "watch-next" : "stale";
 }
 
 function EpisodeRow({ row, onOpenShow, onMarkWatched }: { row: Row; onOpenShow: (id: number) => void; onMarkWatched: (row: Row) => void }) {
@@ -55,13 +82,17 @@ function EpisodeRow({ row, onOpenShow, onMarkWatched }: { row: Row; onOpenShow: 
             {isPremiere && <span className="premiere-tag">PREMIERE</span>}
           </>
         ) : (
-          <p className="muted small">More to watch (couldn't match the exact next episode against TMDB)</p>
+          <p className="muted small">
+            {row.category === "not-started"
+              ? "Not started yet"
+              : "More to watch (couldn't match the exact next episode against TMDB)"}
+          </p>
         )}
       </div>
       <button
         className="watch-toggle-circle"
         onClick={() => onMarkWatched(row)}
-        aria-label="Mark watched"
+        aria-label={row.category === "not-started" ? "Start watching" : "Mark watched"}
         disabled={!row.nextEpisode}
       >
         &#10003;
@@ -82,7 +113,7 @@ function ShowsHome({ onOpenShow }: { onOpenShow: (tmdbId: number) => void }) {
   const allWatched = useLiveQuery(() => db.watchedEpisodes.toArray(), []);
   const [syncing, setSyncing] = useState(false);
   const [syncErrors, setSyncErrors] = useState<string[]>([]);
-  const [tab, setTab] = useState<"next" | "stale">("next");
+  const [tab, setTab] = useState<"next" | "stale" | "not-started">("next");
 
   // Network side effect: make sure TMDB episode lists are cached for every
   // followed show. Writes to db.episodes, which allEpisodes above reacts to,
@@ -132,63 +163,79 @@ function ShowsHome({ onOpenShow }: { onOpenShow: (tmdbId: number) => void }) {
       if (list) list.push(ep);
       else episodesByShow.set(ep.showId, [ep]);
     }
-    const watchedByShow = new Map<number, Set<string>>();
-    const watchedCountByShow = new Map<number, number>();
+    const watchedByShow = new Map<number, typeof allWatched>();
     for (const w of allWatched) {
-      const set = watchedByShow.get(w.showId);
-      if (set) set.add(w.key);
-      else watchedByShow.set(w.showId, new Set([w.key]));
-      watchedCountByShow.set(w.showId, (watchedCountByShow.get(w.showId) ?? 0) + 1);
+      const list = watchedByShow.get(w.showId);
+      if (list) list.push(w);
+      else watchedByShow.set(w.showId, [w]);
     }
 
+    const staleThreshold = getStaleDaysThreshold();
     const result: Row[] = [];
     for (const show of shows) {
       const episodes = episodesByShow.get(show.tmdbId) ?? [];
-      const watchedKeys = watchedByShow.get(show.tmdbId) ?? new Set<string>();
-      const watchedCount = watchedCountByShow.get(show.tmdbId) ?? 0;
+      const watched = watchedByShow.get(show.tmdbId) ?? [];
+      const watchedKeys = new Set(watched.map((w) => w.key));
+      // next = the first UNSEEN released episode in original progression.
+      // For a never-started show this is the first episode (the one to
+      // begin with); for an in-progress show it's the genuine next up.
+      // Rewatches never enter this: watched episodes stay in watchedKeys,
+      // so "next" only ever moves forward through unseen episodes.
       const next = findNextUnwatched(episodes, watchedKeys);
+      // Split by last PROGRESSION, not last activity: a rewatch never
+      // changes watchedAt, so rewatching a stalled show leaves this stuck
+      // in the past and the show stays under "Haven't Watched For a While".
+      const lastProgressedAt = lastProgressionAt(watched);
+      const category = categorize(next, watchedKeys.size, lastProgressedAt, staleThreshold);
+      if (category === null) continue; // caught up / finished
 
-      if (hasMoreToWatch(show, next, watchedCount)) {
-        result.push({
-          showId: show.tmdbId,
-          showName: show.name,
-          posterPath: show.posterPath,
-          nextEpisode: next,
-          additionalCount: countAdditionalUnwatched(episodes, watchedKeys),
-          lastWatchedAt: show.lastWatchedAt,
-        });
-      }
+      result.push({
+        showId: show.tmdbId,
+        showName: show.name,
+        posterPath: show.posterPath,
+        nextEpisode: next,
+        additionalCount: next ? countAdditionalUnwatched(episodes, watchedKeys) : 0,
+        lastProgressedAt,
+        addedAt: show.addedAt,
+        category,
+      });
     }
     return result;
   }, [shows, allEpisodes, allWatched]);
 
   async function markWatched(row: Row) {
     if (!row.nextEpisode) return;
-    await db.watchedEpisodes.put({
-      key: row.nextEpisode.key,
-      showId: row.showId,
-      seasonNumber: row.nextEpisode.seasonNumber,
-      episodeNumber: row.nextEpisode.episodeNumber,
-      watchedAt: new Date().toISOString(),
-      watchCount: 1,
-    });
-    await db.shows.update(row.showId, { lastWatchedAt: new Date().toISOString() });
+    // Marks the next UNSEEN episode watched (starts a not-started show, or
+    // advances an in-progress one). Never a rewatch: Watch Next only ever
+    // points at unseen episodes now, so this always creates a fresh record.
+    await markNextEpisodeWatched(row.showId, row.nextEpisode);
   }
 
   if (!shows || !allEpisodes || !allWatched) return <p className="muted">Loading...</p>;
 
-  const watchNext = rows.filter((r) => (daysSince(r.lastWatchedAt) ?? 0) < STALE_DAYS_THRESHOLD);
-  const stale = rows.filter((r) => (daysSince(r.lastWatchedAt) ?? 0) >= STALE_DAYS_THRESHOLD);
-  const activeList = tab === "next" ? watchNext : stale;
+  // Three MUTUALLY EXCLUSIVE lists (see categorize() above). Watch Next and
+  // the stale list sort by most recent PROGRESSION (rewatches don't reorder
+  // them); Haven't Yet Started sorts by most recently added to the library.
+  const byRecency = (a: Row, b: Row) => (b.lastProgressedAt ?? "").localeCompare(a.lastProgressedAt ?? "");
+  const watchNext = rows.filter((r) => r.category === "watch-next").sort(byRecency);
+  const stale = rows.filter((r) => r.category === "stale").sort(byRecency);
+  const notStarted = rows.filter((r) => r.category === "not-started").sort((a, b) => (b.addedAt ?? "").localeCompare(a.addedAt ?? ""));
+  const activeList = tab === "next" ? watchNext : tab === "stale" ? stale : notStarted;
 
   return (
     <>
       <div className="pill-tabs">
         <button className={`pill-tab ${tab === "next" ? "active" : ""}`} onClick={() => setTab("next")}>
-          Watch Next
+          Watch Next{watchNext.length > 0 ? ` (${watchNext.length})` : ""}
         </button>
         <button className={`pill-tab ${tab === "stale" ? "active" : ""}`} onClick={() => setTab("stale")}>
-          Haven't Watched For a While
+          Haven't Watched For a While{stale.length > 0 ? ` (${stale.length})` : ""}
+        </button>
+        <button
+          className={`pill-tab ${tab === "not-started" ? "active" : ""}`}
+          onClick={() => setTab("not-started")}
+        >
+          Haven't Yet Started{notStarted.length > 0 ? ` (${notStarted.length})` : ""}
         </button>
       </div>
 
@@ -209,7 +256,9 @@ function ShowsHome({ onOpenShow }: { onOpenShow: (tmdbId: number) => void }) {
         <p className="muted">
           {tab === "next"
             ? "Nothing queued up. If you're sure some shows should be here, check Diagnostics in Settings, or re-import using the newer TV Time export format."
-            : "Nothing here, everything with more to watch has been touched recently."}
+            : tab === "stale"
+              ? "Nothing here, everything you've started has been watched recently."
+              : "Nothing here, every show in your library has been started."}
         </p>
       )}
 
@@ -361,19 +410,38 @@ function ComingUp({ onOpenShow }: { onOpenShow: (tmdbId: number) => void }) {
 
 const MTW_CARD_WIDTH = 120;
 const MTW_GAP = 14;
+// Mobile doesn't measure: it shows a capped, horizontally scrollable strip
+// of up to 5 movies, with the view-all tile as the 6th card.
+const MTW_MOBILE_MAX = 5;
 
 function MoviesHome({ onViewAll }: { onViewAll: () => void }) {
   const wantToWatch = useLiveQuery(() => db.movies.filter((m) => !m.watched && m.wantsToWatch).toArray(), []);
   const [openDetails, setOpenDetails] = useState<number | null>(null);
   const railRef = useRef<HTMLDivElement>(null);
+  const isMobile = useIsMobile();
   const [fitCount, setFitCount] = useState(5); // sensible default before the first real measurement
+
+  // Most recently added first, the same comparator as the Movies page's
+  // "Recently added" sort: movies from before addedAt existed have it
+  // undefined and deliberately sort as oldest.
+  const sorted = useMemo(
+    () =>
+      wantToWatch ? [...wantToWatch].sort((a, b) => (b.addedAt ?? "").localeCompare(a.addedAt ?? "")) : undefined,
+    [wantToWatch]
+  );
 
   // Real dynamic fit: measure the rail's actual rendered width (which
   // itself depends on the app shell, the side rail, and the viewport, not
   // just the viewport alone) and compute how many fixed-width cards
   // physically fit, no scrollbar needed. Recomputes on any resize via
-  // ResizeObserver, not just on mount, so it stays correct if the window
-  // is resized or the OS display scale changes.
+  // ResizeObserver.
+  //
+  // The dependency below is the fix for the rail never filling wide
+  // screens: the rail div only exists in the DOM once the query has
+  // resolved AND is non-empty. With [] deps this effect ran exactly once,
+  // on mount, against a still-null ref, so the observer never attached
+  // and fitCount sat at its default forever regardless of window width.
+  const railRendered = (sorted?.length ?? 0) > 0;
   useEffect(() => {
     const el = railRef.current;
     if (!el) return;
@@ -386,25 +454,28 @@ function MoviesHome({ onViewAll }: { onViewAll: () => void }) {
     const observer = new ResizeObserver(recompute);
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [railRendered]);
 
-  if (!wantToWatch) return <p className="muted">Loading...</p>;
+  if (!sorted) return <p className="muted">Loading...</p>;
 
   async function markWatched(tmdbId: number) {
     await db.movies.update(tmdbId, { watched: true, watchedAt: new Date().toISOString() });
   }
 
-  const hasMore = wantToWatch.length > fitCount;
-  // If there's overflow, the last fitting slot becomes the "View all" tile
-  // instead of a movie card, so the total tile count still exactly fills
-  // the measured width, movies + tile together, not movies alone.
-  const visible = wantToWatch.slice(0, hasMore ? Math.max(1, fitCount - 1) : fitCount);
+  const hasMore = sorted.length > (isMobile ? MTW_MOBILE_MAX : fitCount);
+  // Desktop: if there's overflow, the last fitting slot becomes the "View
+  // all" tile instead of a movie card, so movies + tile together still
+  // exactly fill the measured width. Mobile: fixed cap of 5 movies, the
+  // view-all tile rides along as a 6th card in the scrollable strip.
+  const visible = isMobile
+    ? sorted.slice(0, MTW_MOBILE_MAX)
+    : sorted.slice(0, hasMore ? Math.max(1, fitCount - 1) : fitCount);
 
   return (
     <>
       <h3 className="section-title">Movies to Watch</h3>
 
-      {wantToWatch.length === 0 ? (
+      {sorted.length === 0 ? (
         <p className="muted">Nothing on your movie watchlist right now.</p>
       ) : (
         <div className="mtw-rail" ref={railRef}>
@@ -420,7 +491,10 @@ function MoviesHome({ onViewAll }: { onViewAll: () => void }) {
               ) : (
                 <div className="poster-placeholder mtw-poster" onClick={() => setOpenDetails(m.tmdbId)} />
               )}
-              <p className="show-name mtw-name" onClick={() => setOpenDetails(m.tmdbId)}>
+              {/* Single-line ellipsis title (see .mtw-name), so the button
+                  below sits at the same height on every card; the full
+                  title is still available as a hover tooltip. */}
+              <p className="show-name mtw-name" title={m.title} onClick={() => setOpenDetails(m.tmdbId)}>
                 {m.title}
               </p>
               <button onClick={() => markWatched(m.tmdbId)}>Mark watched</button>
@@ -429,7 +503,7 @@ function MoviesHome({ onViewAll }: { onViewAll: () => void }) {
           {hasMore && (
             <div className="mtw-card">
               <button type="button" className="mtw-view-all-tile" onClick={onViewAll} aria-label="View all movies to watch">
-                <span className="mtw-view-all-count">+{wantToWatch.length - visible.length}</span>
+                <span className="mtw-view-all-count">+{sorted.length - visible.length}</span>
                 <span>View all</span>
                 <span aria-hidden="true">&rsaquo;</span>
               </button>

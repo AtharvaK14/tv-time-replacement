@@ -55,7 +55,7 @@ a { color: var(--accent); }
 
 .field-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
-input[type="text"], select {
+input[type="text"], input[type="number"], select {
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--text);
@@ -350,9 +350,25 @@ hr { border: none; border-top: 1px solid var(--border); }
 }
 .danger-button:hover { background: rgba(224, 102, 92, 0.2); }
 
-/* Home pill-tabs (Watch Next / Haven't Watched, mutually exclusive) */
-.pill-tabs { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+/* Home pill-tabs (Watch Next / Haven't Watched / Haven't Yet Started).
+   Single row that scrolls sideways instead of stacking one pill per line:
+   the three labels can't all fit across a phone, and shrinking them enough
+   to fit two-per-row is fragile once the "(N)" counts grow. Horizontal
+   scroll keeps every label full (no ellipsis) and off its own line. On
+   desktop the row is wide enough that all three fit and nothing scrolls. */
+.pill-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none; /* Firefox */
+  overscroll-behavior-x: contain; /* don't trigger WebView back-swipe at the ends */
+}
+.pill-tabs::-webkit-scrollbar { display: none; } /* Chrome / Android WebView */
 .pill-tab {
+  flex: 0 0 auto; /* keep natural width, never shrink or wrap the label */
+  white-space: nowrap;
   border-radius: 999px; padding: 7px 16px; font-size: 0.85rem; font-weight: 600;
   background: var(--surface); border: 1px solid var(--border); color: var(--muted);
 }
@@ -1088,6 +1104,12 @@ details[open] > summary::after { transform: rotate(90deg); }
   font-size: 0.82rem;
   margin: 6px 0 6px;
   cursor: pointer;
+  /* Exactly one line, long titles get an ellipsis (full title in the
+     hover tooltip): keeps every card the same height so the Mark watched
+     button sits at a fixed position regardless of title length. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .mtw-card button { width: 100%; font-size: 0.78rem; padding: 6px 0; }
 
@@ -1108,6 +1130,18 @@ details[open] > summary::after { transform: rotate(90deg); }
 }
 .mtw-view-all-tile:hover { border-color: var(--accent); color: var(--accent); }
 .mtw-view-all-count { font-size: 1.3rem; font-weight: 700; }
+
+/* Mobile: the rail becomes a horizontal scroller (Home.tsx caps it at 5
+   movies + the view-all tile) instead of a measured desktop fit. Same
+   640px breakpoint as useIsMobile/bottom-nav, kept in sync on purpose. */
+@media (max-width: 640px) {
+  .mtw-rail {
+    overflow-x: auto;
+    padding-bottom: 8px; /* keep the scrollbar off the buttons */
+    scrollbar-width: thin;
+    overscroll-behavior-x: contain; /* don't trigger browser/WebView swipe-nav at the ends */
+  }
+}
 
 /* ============================================================
    Segmented control (status filter), genre chips, and compact

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { db, type Episode } from "../db";
+import { db, type Episode, type Movie } from "../db";
 import { getTvShowDetails, getMovieDetails, TMDB_IMAGE_BASE, TMDB_BACKDROP_BASE } from "../tmdb";
 import { getOmdbRatings, hasOmdbKey, type OmdbRatings } from "../omdb";
 import { averageRuntime } from "../lib/runtime";
 import { getSeasonNumbers, ensureSeasonCached, totalEpisodeCount } from "../lib/episodeSync";
+import { ensureEpisodesWatched, recordEpisodeRewatch, recordMovieRewatch } from "../lib/watchEvents";
 import { useDraggableSheet } from "../lib/useDraggableSheet";
 import { useLockBodyScroll } from "../lib/useLockBodyScroll";
 import { useIsMobile } from "../lib/useIsMobile";
@@ -61,6 +62,8 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
   const [details, setDetails] = useState<CoreDetails | null>(null);
   const [ratings, setRatings] = useState<OmdbRatings | null | "loading">("loading");
   const [inLibrary, setInLibrary] = useState(false);
+  const [movieWatched, setMovieWatched] = useState(false); // movies only
+  const [movieRewatchCount, setMovieRewatchCount] = useState(0); // movies only, extra watches beyond the first
   const [added, setAdded] = useState(false);
   const [removeConfirming, setRemoveConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -136,6 +139,8 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
           });
           const existing = await db.movies.get(tmdbId);
           setInLibrary(!!existing);
+          setMovieWatched(existing?.watched ?? false);
+          setMovieRewatchCount(existing?.rewatchCount ?? 0);
           if (hasOmdbKey()) {
             const r = await getOmdbRatings({
               imdbId: d.external_ids?.imdb_id,
@@ -185,17 +190,20 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
     null
   );
 
+  // Idempotent "make these count as watched" via the shared write path:
+  // already-watched rows keep their history (the old inline bulkPut reset
+  // imported watchCounts back to 1), and Show.lastWatchedAt gets bumped so
+  // panel-marked activity counts as activity for the Watch Next split
+  // (previously only Home's checkmark did that).
   async function markEpisodesWatched(eps: Episode[]) {
-    await db.watchedEpisodes.bulkPut(
-      eps.map((ep) => ({
-        key: ep.key,
-        showId: ep.showId,
-        seasonNumber: ep.seasonNumber,
-        episodeNumber: ep.episodeNumber,
-        watchedAt: new Date().toISOString(),
-        watchCount: 1,
-      }))
-    );
+    await ensureEpisodesWatched(tmdbId, eps);
+    await refreshWatchedAndEpisodes();
+  }
+
+  // One more watch EVENT for already-watched episodes: watchCount + latest
+  // date bump, one row per episode forever.
+  async function rewatchEpisodes(eps: Episode[]) {
+    await recordEpisodeRewatch(tmdbId, eps);
     await refreshWatchedAndEpisodes();
   }
 
@@ -267,6 +275,24 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
     setCatchUpOffer(null);
   }
 
+  // Shared by "Add to Movies" (unwatched) and "Add & mark watched": one
+  // record shape, so the two paths can't drift apart.
+  function buildMovieRecord(watched: boolean, d: CoreDetails): Movie {
+    return {
+      tmdbId,
+      title: d.name,
+      posterPath: d.posterPath,
+      releaseYear: d.releaseDate ? Number(d.releaseDate.slice(0, 4)) : null,
+      releaseDate: d.releaseDate ?? null,
+      watched,
+      watchedAt: watched ? new Date().toISOString() : null,
+      wantsToWatch: !watched,
+      runtimeMinutes: d.runtimeMinutes ?? null,
+      imdbId: d.imdbId ?? null,
+      addedAt: new Date().toISOString(),
+    };
+  }
+
   async function handleAdd() {
     if (!details) return;
     if (kind === "show") {
@@ -286,22 +312,35 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
       });
       await refreshWatchedAndEpisodes();
     } else {
-      await db.movies.put({
-        tmdbId,
-        title: details.name,
-        posterPath: details.posterPath,
-        releaseYear: details.releaseDate ? Number(details.releaseDate.slice(0, 4)) : null,
-        releaseDate: details.releaseDate ?? null,
-        watched: false,
-        watchedAt: null,
-        wantsToWatch: true,
-        runtimeMinutes: details.runtimeMinutes ?? null,
-        imdbId: details.imdbId ?? null,
-        addedAt: new Date().toISOString(),
-      });
+      await db.movies.put(buildMovieRecord(false, details));
     }
     setInLibrary(true);
     setAdded(true);
+  }
+
+  /**
+   * One tap from the panel instead of add -> switch to Movies -> find it
+   * -> mark watched. Not in the library yet: adds it already marked
+   * watched. Already in: toggles. Unmarking puts the movie back on the
+   * want-to-watch list (wantsToWatch: true) rather than stranding it in
+   * the library on neither list, mirroring the Home rail round trip.
+   */
+  async function toggleMovieWatched() {
+    if (kind !== "movie" || !details) return;
+    if (!inLibrary) {
+      await db.movies.put(buildMovieRecord(true, details));
+      setInLibrary(true);
+      setAdded(true);
+      setMovieWatched(true);
+      return;
+    }
+    if (movieWatched) {
+      await db.movies.update(tmdbId, { watched: false, watchedAt: null, wantsToWatch: true });
+      setMovieWatched(false);
+    } else {
+      await db.movies.update(tmdbId, { watched: true, watchedAt: new Date().toISOString(), wantsToWatch: false });
+      setMovieWatched(true);
+    }
   }
 
   async function handleRemove() {
@@ -351,12 +390,33 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
         <>
           <p className="status-ok">
             {added ? `Added to your ${kind === "show" ? "Shows" : "Movies"}.` : `Already in your ${kind === "show" ? "Shows" : "Movies"}.`}
+            {kind === "movie" && movieWatched
+              ? movieRewatchCount > 0
+                ? ` Watched ${movieRewatchCount + 1} times.`
+                : " Marked as watched."
+              : ""}
           </p>
-          {!removeConfirming ? (
-            <button className="danger-button" onClick={() => setRemoveConfirming(true)}>
-              Remove from {kind === "show" ? "Shows" : "Movies"}
-            </button>
-          ) : (
+          <div className="field-row">
+            {kind === "movie" && (
+              <button onClick={toggleMovieWatched}>{movieWatched ? "Mark unwatched" : "Mark watched"}</button>
+            )}
+            {kind === "movie" && movieWatched && (
+              <button
+                onClick={async () => {
+                  await recordMovieRewatch(tmdbId);
+                  setMovieRewatchCount((c) => c + 1);
+                }}
+              >
+                Watch again
+              </button>
+            )}
+            {!removeConfirming && (
+              <button className="danger-button" onClick={() => setRemoveConfirming(true)}>
+                Remove from {kind === "show" ? "Shows" : "Movies"}
+              </button>
+            )}
+          </div>
+          {removeConfirming && (
             <div className="field-row">
               <span className="muted small">
                 Also deletes {kind === "show" ? "its watch history" : "its watched status"}. No undo.
@@ -369,7 +429,10 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
           )}
         </>
       ) : (
-        <button onClick={handleAdd}>{kind === "show" ? "Add to Shows" : "Add to Movies"}</button>
+        <div className="field-row">
+          <button onClick={handleAdd}>{kind === "show" ? "Add to Shows" : "Add to Movies"}</button>
+          {kind === "movie" && <button onClick={toggleMovieWatched}>Add &amp; mark watched</button>}
+        </div>
       )}
     </>
   );
@@ -460,6 +523,17 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
                     {allWatched ? "Mark unwatched" : "Mark watched"}
                   </button>
                 )}
+                {inLibrary && isExpanded && eps.length > 0 && allWatched && (
+                  <button
+                    className="link-button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      rewatchEpisodes(eps);
+                    }}
+                  >
+                    Watch again
+                  </button>
+                )}
               </div>
             </div>
 
@@ -535,6 +609,10 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
       canToggleWatched={inLibrary}
       onToggleWatched={async () => {
         await toggleEpisodeWatched(openEpisode);
+        setOpenEpisode(null);
+      }}
+      onWatchAgain={async () => {
+        await rewatchEpisodes([openEpisode]);
         setOpenEpisode(null);
       }}
       onClose={() => setOpenEpisode(null)}

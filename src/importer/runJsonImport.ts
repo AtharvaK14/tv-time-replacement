@@ -118,6 +118,9 @@ export async function runJsonImport(
       for (const season of show.seasons) {
         for (const ep of season.episodes) {
           if (!ep.is_watched) continue;
+          // The export carries one watched_at per episode (its latest
+          // known watch), so it seeds BOTH first- and last-watch fields;
+          // in-app rewatches diverge them from there.
           watchedRecords.push({
             key: episodeKey(tmdbId, season.number, ep.number),
             showId: tmdbId,
@@ -125,6 +128,7 @@ export async function runJsonImport(
             episodeNumber: ep.number,
             watchedAt: ep.watched_at || new Date().toISOString(),
             watchCount: ep.watched_count || 1,
+            lastWatchedAt: ep.watched_at || new Date().toISOString(),
           });
         }
       }

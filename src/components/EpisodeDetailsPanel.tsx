@@ -10,10 +10,14 @@ interface Props {
   watched: boolean;
   canToggleWatched?: boolean;
   onToggleWatched: () => void;
+  // Rewatch support: records one more watch EVENT for an already-watched
+  // episode (watchCount + latest date), never a duplicate row. Optional so
+  // preview contexts without library membership simply don't offer it.
+  onWatchAgain?: () => void;
   onClose: () => void;
 }
 
-export default function EpisodeDetailsPanel({ show, episode, watched, canToggleWatched = true, onToggleWatched, onClose }: Props) {
+export default function EpisodeDetailsPanel({ show, episode, watched, canToggleWatched = true, onToggleWatched, onWatchAgain, onClose }: Props) {
   // Same reference-counted lock DetailsPanel uses. This panel is often
   // opened FROM WITHIN an already-open DetailsPanel (both call this hook),
   // the ref-counting in useLockBodyScroll ensures closing this one doesn't
@@ -94,7 +98,10 @@ export default function EpisodeDetailsPanel({ show, episode, watched, canToggleW
                 cause of a real bug where opening episode details also silently toggled its
                 watched state. Keeping these fully separate interactive elements on purpose. */}
             {canToggleWatched && (
-              <button onClick={onToggleWatched}>{watched ? "Mark unwatched" : "Mark watched"}</button>
+              <div className="field-row">
+                <button onClick={onToggleWatched}>{watched ? "Mark unwatched" : "Mark watched"}</button>
+                {watched && onWatchAgain && <button onClick={onWatchAgain}>Watch again</button>}
+              </div>
             )}
           </div>
         </div>

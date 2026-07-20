@@ -19,6 +19,7 @@ import {
   getLastBackupAt,
   API_KEYS_CHANGED_EVENT,
 } from "../lib/persistence";
+import { getStaleDaysThreshold, setStaleDaysThreshold, DEFAULT_STALE_DAYS_THRESHOLD } from "../lib/showStatus";
 import ImportWizard from "./ImportWizard";
 import Diagnostics from "./Diagnostics";
 
@@ -387,6 +388,50 @@ function BackupRestore() {
   );
 }
 
+function WatchNextPreferences() {
+  const [days, setDays] = useState(() => String(getStaleDaysThreshold()));
+  const [saved, setSaved] = useState(false);
+
+  const parsed = Number(days);
+  const valid = Number.isFinite(parsed) && parsed >= 1;
+
+  function save() {
+    if (!valid) return;
+    setStaleDaysThreshold(parsed);
+    setSaved(true);
+  }
+
+  return (
+    <div className="panel">
+      <div className="settings-block">
+        <h3>"Haven't Watched For a While" threshold</h3>
+        <p className="muted small">
+          Days without watch activity before a show moves off Watch Next into "Haven't Watched For a While". The
+          two lists never overlap; watching the next episode moves the show straight back. Default:{" "}
+          {DEFAULT_STALE_DAYS_THRESHOLD} days.
+        </p>
+        <div className="field-row">
+          <input
+            type="number"
+            min={1}
+            value={days}
+            onChange={(e) => {
+              setDays(e.target.value);
+              setSaved(false);
+            }}
+            style={{ minWidth: 100, width: 100 }}
+          />
+          <button onClick={save} disabled={!valid}>
+            Save
+          </button>
+        </div>
+        {saved && <p className="status-ok">Saved. Takes effect next time Home loads.</p>}
+        {!valid && days !== "" && <p className="status-error">Enter a number of days, 1 or higher.</p>}
+      </div>
+    </div>
+  );
+}
+
 function ResetData() {
   const [confirming, setConfirming] = useState(false);
   const [done, setDone] = useState(false);
@@ -472,6 +517,18 @@ export default function Settings() {
         </summary>
         <div style={{ marginTop: 14 }}>
           <ApiKeys />
+        </div>
+      </details>
+
+      <details>
+        <summary>
+          <span className="settings-row-text">
+            <h3>Watch Next</h3>
+            <p className="muted small settings-row-sub">When shows count as "haven't watched for a while"</p>
+          </span>
+        </summary>
+        <div style={{ marginTop: 14 }}>
+          <WatchNextPreferences />
         </div>
       </details>
 

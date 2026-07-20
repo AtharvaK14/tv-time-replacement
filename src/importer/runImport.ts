@@ -79,18 +79,20 @@ export async function runImport(
       // discard rewatches. Verified against real data that 28.6% of all
       // episode watch events in a real export are rewatches, silently
       // dropping them would undercount time-watched stats by a large
-      // margin, not a rounding error. watchedAt still uses the EARLIEST
-      // event (first watch date), watchCount uses the total.
+      // margin, not a rounding error. watchedAt uses the EARLIEST event
+      // (first watch date), lastWatchedAt the LATEST (rewatch recency,
+      // drives "Haven't Watched For a While"), watchCount the total.
       const episodeRows = byShow.get(rawTitle)!;
-      const bySeasonEpisode = new Map<string, { earliest: string; count: number }>();
+      const bySeasonEpisode = new Map<string, { earliest: string; latest: string; count: number }>();
       for (const row of episodeRows) {
         const k = `${row.season_number}-${row.episode_number}`;
         const existing = bySeasonEpisode.get(k);
         if (!existing) {
-          bySeasonEpisode.set(k, { earliest: row.created_at, count: 1 });
+          bySeasonEpisode.set(k, { earliest: row.created_at, latest: row.created_at, count: 1 });
         } else {
           bySeasonEpisode.set(k, {
             earliest: row.created_at && row.created_at < existing.earliest ? row.created_at : existing.earliest,
+            latest: row.created_at && row.created_at > existing.latest ? row.created_at : existing.latest,
             count: existing.count + 1,
           });
         }
@@ -145,6 +147,7 @@ export async function runImport(
           episodeNumber: episode,
           watchedAt: v.earliest || new Date().toISOString(),
           watchCount: v.count,
+          lastWatchedAt: v.latest || v.earliest || new Date().toISOString(),
         };
       });
       await db.watchedEpisodes.bulkPut(watchedRecords);
