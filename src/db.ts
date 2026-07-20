@@ -52,6 +52,12 @@ export interface WatchedEpisode {
   episodeNumber: number;
   watchedAt: string; // ISO timestamp of the first watch, from TV Time's earliest event for this episode
   watchCount: number; // total watch + rewatch events for this episode, for accurate time-watched stats
+  // ISO timestamp of the MOST RECENT watch event (rewatch support). One
+  // row per episode always — a rewatch bumps watchCount and this field,
+  // never creates a duplicate row, so distinct-episodes-watched counts
+  // stay stable while activity recency stays truthful. Undefined for
+  // records written before v10; readers must treat that as watchedAt.
+  lastWatchedAt?: string;
 }
 
 export interface Movie {
@@ -60,6 +66,9 @@ export interface Movie {
   posterPath: string | null;
   releaseYear: number | null;
   watched: boolean;
+  // ISO timestamp of the LATEST watch (rewatch support bumps this; it was
+  // first-watch-only before v10). rewatchCount preserves how many extra
+  // watches happened, so "movies watched" counts never inflate.
   watchedAt: string | null;
   wantsToWatch: boolean; // from TV Time's 'follow'/'towatch' events, true even before watched
   runtimeMinutes?: number | null; // undefined until backfilled for pre-existing rows
@@ -221,6 +230,19 @@ class TrackerDB extends Dexie {
     });
     // v9: added Movie.addedAt. Purely additive, same pattern as v8.
     this.version(9).stores({
+      shows: "tmdbId, name, isFollowed, lastWatchedAt, tvdbId",
+      episodes: "key, showId, [showId+seasonNumber]",
+      watchedEpisodes: "key, showId, watchedAt",
+      movies: "tmdbId, title, watched, wantsToWatch",
+      titleMatches: "rawTitle, kind",
+      settings: "key",
+    });
+    // v10: added WatchedEpisode.lastWatchedAt for rewatch support (one row
+    // per episode, rewatches bump watchCount + lastWatchedAt). Purely
+    // additive, no index changes, nothing cleared — watchedEpisodes holds
+    // real history and is never cleared in any migration. Old rows have
+    // lastWatchedAt undefined; readers fall back to watchedAt.
+    this.version(10).stores({
       shows: "tmdbId, name, isFollowed, lastWatchedAt, tvdbId",
       episodes: "key, showId, [showId+seasonNumber]",
       watchedEpisodes: "key, showId, watchedAt",

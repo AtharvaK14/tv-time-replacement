@@ -111,7 +111,7 @@ export async function ensureSeasonCached(tmdbId: number, seasonNumber: number): 
  * episodes that were correctly marked unwatched but had incomplete TMDB
  * date data, confirmed via Diagnostics against a real show (Spider-Noir).
  */
-function isAvailableToWatch(airDate: string | null, today: string): boolean {
+export function isAvailableToWatch(airDate: string | null, today: string): boolean {
   if (!airDate) return true;
   return airDate <= today;
 }

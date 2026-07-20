@@ -55,7 +55,7 @@ a { color: var(--accent); }
 
 .field-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
-input[type="text"], select {
+input[type="text"], input[type="number"], select {
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--text);
@@ -350,9 +350,25 @@ hr { border: none; border-top: 1px solid var(--border); }
 }
 .danger-button:hover { background: rgba(224, 102, 92, 0.2); }
 
-/* Home pill-tabs (Watch Next / Haven't Watched, mutually exclusive) */
-.pill-tabs { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+/* Home pill-tabs (Watch Next / Haven't Watched / Haven't Yet Started).
+   Single row that scrolls sideways instead of stacking one pill per line:
+   the three labels can't all fit across a phone, and shrinking them enough
+   to fit two-per-row is fragile once the "(N)" counts grow. Horizontal
+   scroll keeps every label full (no ellipsis) and off its own line. On
+   desktop the row is wide enough that all three fit and nothing scrolls. */
+.pill-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none; /* Firefox */
+  overscroll-behavior-x: contain; /* don't trigger WebView back-swipe at the ends */
+}
+.pill-tabs::-webkit-scrollbar { display: none; } /* Chrome / Android WebView */
 .pill-tab {
+  flex: 0 0 auto; /* keep natural width, never shrink or wrap the label */
+  white-space: nowrap;
   border-radius: 999px; padding: 7px 16px; font-size: 0.85rem; font-weight: 600;
   background: var(--surface); border: 1px solid var(--border); color: var(--muted);
 }
