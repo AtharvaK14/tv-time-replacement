@@ -9,6 +9,7 @@ import Settings from "./pages/Settings";
 import BackupNudge from "./components/BackupNudge";
 import FirstRunWizard from "./components/FirstRunWizard";
 import { hasApiKey } from "./tmdb";
+import { APP_NAME } from "./appInfo";
 import {
   initStoragePersistence,
   shouldShowBackupNudge,
@@ -109,7 +110,7 @@ function App() {
 
       <div className="app-shell">
         <header className="app-header">
-          <span className="brand">WatchTime</span>
+          <span className="brand">{APP_NAME}</span>
         </header>
 
         {nudge.show && nudge.reason && (

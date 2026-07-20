@@ -22,6 +22,7 @@ import {
 import { getStaleDaysThreshold, setStaleDaysThreshold, DEFAULT_STALE_DAYS_THRESHOLD } from "../lib/showStatus";
 import ImportWizard from "./ImportWizard";
 import Diagnostics from "./Diagnostics";
+import About from "../components/About";
 
 type KeyStatus = "idle" | "checking" | "valid" | "invalid";
 
@@ -162,8 +163,8 @@ function ApiKeys() {
 
       <hr />
       <p className="muted small">
-        Required attribution, per TMDB's terms: this product uses the TMDB API but is not endorsed or certified by
-        TMDB. OMDb content is CC BY-NC 4.0, non-commercial use only, same as this app.
+        Attribution, per TMDB's terms: "This product uses the TMDB API but is not endorsed or certified by TMDB."
+        OMDb content is CC BY-NC 4.0, non-commercial use only, same as this app. Full credits are under About below.
       </p>
     </div>
   );
@@ -541,6 +542,18 @@ export default function Settings() {
         </summary>
         <div style={{ marginTop: 14 }}>
           <Diagnostics />
+        </div>
+      </details>
+
+      <details>
+        <summary>
+          <span className="settings-row-text">
+            <h3>About</h3>
+            <p className="muted small settings-row-sub">Credits, data sources, and privacy</p>
+          </span>
+        </summary>
+        <div style={{ marginTop: 14 }}>
+          <About />
         </div>
       </details>
 
