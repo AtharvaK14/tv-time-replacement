@@ -104,6 +104,20 @@ export interface Setting {
   value: string;
 }
 
+// Cache of OMDb rating lookups (Play Store prep, Phase 3). OMDb's free tier
+// is 1,000 requests/day per key; without a cache every re-open of a details
+// panel re-spent quota on data that barely changes. Keyed by a stable
+// string (imdbId-based when available). data holds the whole OmdbRatings /
+// OmdbEpisodeRating result; fetchedAt drives a TTL so it eventually
+// refreshes. Rate-limited and network-error responses are never cached —
+// only genuine hits and confirmed "not found" results.
+export interface OmdbCacheEntry {
+  cacheKey: string;
+  kind: "ratings" | "episode";
+  fetchedAt: string; // ISO
+  data: unknown;
+}
+
 // ---- Database -----------------------------------------------------------
 
 class TrackerDB extends Dexie {
@@ -113,6 +127,7 @@ class TrackerDB extends Dexie {
   movies!: Table<Movie, number>;
   titleMatches!: Table<TitleMatch, string>;
   settings!: Table<Setting, string>;
+  omdbCache!: Table<OmdbCacheEntry, string>;
 
   constructor() {
     super("tv-tracker");
@@ -249,6 +264,19 @@ class TrackerDB extends Dexie {
       movies: "tmdbId, title, watched, wantsToWatch",
       titleMatches: "rawTitle, kind",
       settings: "key",
+    });
+    // v11: added the omdbCache table (OMDb rate-limit resilience). Purely
+    // additive — a new re-derivable cache table, existing tables untouched,
+    // nothing cleared. Deliberately NOT part of the backup format (it's a
+    // cache, keyed by stable imdbIds, and cheap to rebuild).
+    this.version(11).stores({
+      shows: "tmdbId, name, isFollowed, lastWatchedAt, tvdbId",
+      episodes: "key, showId, [showId+seasonNumber]",
+      watchedEpisodes: "key, showId, watchedAt",
+      movies: "tmdbId, title, watched, wantsToWatch",
+      titleMatches: "rawTitle, kind",
+      settings: "key",
+      omdbCache: "cacheKey, kind",
     });
   }
 }

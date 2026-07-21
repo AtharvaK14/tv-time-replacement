@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { checkTmdbKey, TMDB_API_KEY_STORAGE } from "../tmdb";
-import { checkOmdbKey, OMDB_API_KEY_STORAGE } from "../omdb";
+import { checkOmdbKey, OMDB_API_KEY_STORAGE, isOmdbRateLimited, omdbQuotaResumeTime } from "../omdb";
 import { db } from "../db";
 import {
   exportAndDownloadBackup,
@@ -22,6 +22,7 @@ import {
 import { getStaleDaysThreshold, setStaleDaysThreshold, DEFAULT_STALE_DAYS_THRESHOLD } from "../lib/showStatus";
 import ImportWizard from "./ImportWizard";
 import Diagnostics from "./Diagnostics";
+import About from "../components/About";
 
 type KeyStatus = "idle" | "checking" | "valid" | "invalid";
 
@@ -158,12 +159,19 @@ function ApiKeys() {
         </div>
         {omdbStatus === "valid" && <p className="status-ok">{omdbNote ?? "Key verified and saved."}</p>}
         {omdbStatus === "invalid" && omdbError && <p className="status-error">{omdbError}</p>}
+        {isOmdbRateLimited() && (
+          <p className="muted small">
+            This key has hit OMDb's daily lookup limit. Ratings resume automatically
+            {omdbQuotaResumeTime() ? ` after ${new Date(omdbQuotaResumeTime()!).toLocaleString()}` : " tomorrow"}. Cached
+            ratings still show in the meantime.
+          </p>
+        )}
       </div>
 
       <hr />
       <p className="muted small">
-        Required attribution, per TMDB's terms: this product uses the TMDB API but is not endorsed or certified by
-        TMDB. OMDb content is CC BY-NC 4.0, non-commercial use only, same as this app.
+        Attribution, per TMDB's terms: "This product uses the TMDB API but is not endorsed or certified by TMDB."
+        OMDb content is CC BY-NC 4.0, non-commercial use only, same as this app. Full credits are under About below.
       </p>
     </div>
   );
@@ -541,6 +549,18 @@ export default function Settings() {
         </summary>
         <div style={{ marginTop: 14 }}>
           <Diagnostics />
+        </div>
+      </details>
+
+      <details>
+        <summary>
+          <span className="settings-row-text">
+            <h3>About</h3>
+            <p className="muted small settings-row-sub">Credits, data sources, and privacy</p>
+          </span>
+        </summary>
+        <div style={{ marginTop: 14 }}>
+          <About />
         </div>
       </details>
 

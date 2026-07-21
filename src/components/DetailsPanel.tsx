@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { db, type Episode, type Movie } from "../db";
 import { getTvShowDetails, getMovieDetails, TMDB_IMAGE_BASE, TMDB_BACKDROP_BASE } from "../tmdb";
-import { getOmdbRatings, hasOmdbKey, type OmdbRatings } from "../omdb";
+import { getOmdbRatings, hasOmdbKey, OMDB_RATE_LIMIT_MESSAGE, type OmdbRatings } from "../omdb";
 import { averageRuntime } from "../lib/runtime";
 import { getSeasonNumbers, ensureSeasonCached, totalEpisodeCount } from "../lib/episodeSync";
 import { ensureEpisodesWatched, recordEpisodeRewatch, recordMovieRewatch } from "../lib/watchEvents";
 import { useDraggableSheet } from "../lib/useDraggableSheet";
 import { useLockBodyScroll } from "../lib/useLockBodyScroll";
 import { useIsMobile } from "../lib/useIsMobile";
+import { useBackHandler } from "../lib/backHandler";
 import EpisodeDetailsPanel from "./EpisodeDetailsPanel";
 
 interface Props {
@@ -58,6 +59,9 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
   useLockBodyScroll();
   const { sheetStyle, handleProps } = useDraggableSheet(onClose);
   const isMobile = useIsMobile();
+  // Android back closes this panel instead of the app. A stacked episode
+  // panel registers its own handler on top, so back closes that first.
+  useBackHandler(true, onClose);
 
   const [details, setDetails] = useState<CoreDetails | null>(null);
   const [ratings, setRatings] = useState<OmdbRatings | null | "loading">("loading");
@@ -375,7 +379,11 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
           {ratings.rottenTomatoes && <span className="rating-pill">RT {ratings.rottenTomatoes}</span>}
           {!ratings.imdbRating && !ratings.rottenTomatoes && (
             <span className="muted small">
-              {ratings.error ? `OMDb: ${ratings.error}` : "No ratings found for this title on OMDb."}
+              {ratings.rateLimited
+                ? OMDB_RATE_LIMIT_MESSAGE
+                : ratings.error
+                  ? `OMDb: ${ratings.error}`
+                  : "No ratings found for this title on OMDb."}
             </span>
           )}
         </>

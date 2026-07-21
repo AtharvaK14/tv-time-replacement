@@ -2,6 +2,17 @@ import { useState } from "react";
 import { checkTmdbKey, TMDB_API_KEY_STORAGE, type KeyCheckResult } from "../tmdb";
 import { checkOmdbKey, OMDB_API_KEY_STORAGE, type OmdbKeyCheckResult } from "../omdb";
 import { useLockBodyScroll } from "../lib/useLockBodyScroll";
+import { useBackHandler } from "../lib/backHandler";
+
+// Previous step for the Android back button, so back walks the wizard
+// backward instead of exiting the app mid-onboarding. Welcome has no
+// previous step (back does nothing there — onboarding is a first-run gate).
+const PREVIOUS_STEP: Record<Step, Step | null> = {
+  welcome: null,
+  tmdb: "welcome",
+  omdb: "tmdb",
+  done: "omdb",
+};
 
 /**
  * First-run onboarding (Play Store prep, Phase 1). A stranger installing
@@ -37,6 +48,12 @@ const OMDB_ERRORS: Record<Exclude<OmdbKeyCheckResult, "valid" | "rate-limited">,
 export default function FirstRunWizard({ onComplete }: { onComplete: () => void }) {
   useLockBodyScroll();
   const [step, setStep] = useState<Step>("welcome");
+
+  // Android back walks the wizard backward rather than exiting the app.
+  useBackHandler(true, () => {
+    const prev = PREVIOUS_STEP[step];
+    if (prev) setStep(prev);
+  });
 
   const [tmdbKey, setTmdbKey] = useState("");
   const [tmdbStatus, setTmdbStatus] = useState<FieldStatus>("idle");

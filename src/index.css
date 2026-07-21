@@ -23,7 +23,10 @@ body {
 
 #root { min-height: 100vh; }
 
-.app-shell { max-width: 1600px; margin: 0 auto; padding: 0 32px 60px; }
+/* env(safe-area-inset-top) clears the Android status bar / notch, since the
+   Capacitor WebView draws edge-to-edge behind it. Zero on the desktop web
+   build (no inset), so this is harmless there. */
+.app-shell { max-width: 1600px; margin: 0 auto; padding: env(safe-area-inset-top) 32px 60px; }
 
 .app-header {
   display: flex;
@@ -34,6 +37,9 @@ body {
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
   font-weight: 700;
   font-size: 1.3rem;
   letter-spacing: -0.02em;
@@ -595,16 +601,14 @@ hr { border: none; border-top: 1px solid var(--border); }
   }
 
   .side-rail-mark {
-    width: 30px;
-    height: 30px;
-    border-radius: 7px;
-    background: var(--text);
-    color: var(--bg);
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-weight: 800;
-    font-size: 0.95rem;
     margin-bottom: 8px;
     flex-shrink: 0;
   }
@@ -645,7 +649,7 @@ hr { border: none; border-top: 1px solid var(--border); }
      hidden behind the fixed bottom nav. env(safe-area-inset-bottom)
      accounts for the home-indicator strip on notched iPhones. */
   .app-shell {
-    padding: 0 16px calc(72px + env(safe-area-inset-bottom));
+    padding: env(safe-area-inset-top) 16px calc(72px + env(safe-area-inset-bottom));
   }
 
   .bottom-nav {
@@ -1281,3 +1285,39 @@ details[open] > summary::after { transform: rotate(90deg); }
 .wizard input[type="text"] { width: 100%; }
 
 .wizard a { color: var(--accent); }
+
+
+/* ---- About / Credits screen (Phase 2 attribution) ------------------------ */
+
+.about-source { border-left: 2px solid var(--border); padding-left: 12px; }
+
+/* Official TMDB logo: sized only, never recolored (brand requirement). Its
+   own gradient reads fine on the dark surface. */
+.about-tmdb-logo {
+  display: block;
+  height: 34px;
+  width: auto;
+  margin-bottom: 8px;
+}
+
+/* The exact TMDB-required notice: kept visually distinct so it reads as a
+   formal statement, not body copy. */
+.about-notice {
+  font-size: 0.92rem;
+  margin: 4px 0;
+  color: var(--text);
+}
+
+
+/* ---- Offline banner (Phase 4 native: distinct from any no-results state) -- */
+
+.offline-banner {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 18px;
+  font-size: 0.9rem;
+  color: var(--text);
+}

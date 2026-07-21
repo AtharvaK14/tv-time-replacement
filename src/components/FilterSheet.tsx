@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from "react";
 import { useIsMobile } from "../lib/useIsMobile";
 import { useLockBodyScroll } from "../lib/useLockBodyScroll";
+import { useBackHandler } from "../lib/backHandler";
 
 interface Props {
   resultCount: number;
@@ -51,6 +52,7 @@ function FilterSheetOverlay({
   children: ReactNode;
 }) {
   useLockBodyScroll();
+  useBackHandler(true, onClose); // Android back closes the filter sheet
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {

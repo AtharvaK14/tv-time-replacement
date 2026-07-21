@@ -1,3 +1,11 @@
 node_modules
 dist
 .DS_Store
+
+# Capacitor: generated web-asset copies (mirror of dist/, recreated by `cap sync`)
+android/app/src/main/assets/public
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+
+# JetBrains / Android Studio IDE files (matches .idea at any depth)
+.idea/
