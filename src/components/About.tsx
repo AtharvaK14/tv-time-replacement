@@ -3,11 +3,9 @@ import { APP_NAME } from "../appInfo";
 // brand terms — do not recolor it via CSS.
 import tmdbLogo from "../assets/tmdb-logo.svg";
 
-// PLACEHOLDER: swap in the real hosted privacy-policy URL before store
-// submission. The policy text itself is written and hosted separately
-// (out of scope for code); example.com is IANA's reserved placeholder
-// domain, so this link goes nowhere real on purpose until replaced.
-const PRIVACY_POLICY_URL = "https://example.com/privacy-policy";
+// Hosted via GitHub Pages from this repo's docs/privacy.html. This URL goes
+// live once Pages is enabled (Settings → Pages → Source: main /docs).
+const PRIVACY_POLICY_URL = "https://atharvak14.github.io/tv-time-replacement/privacy.html";
 
 /**
  * About / Credits screen (Play Store prep, Phase 2). Carries the
@@ -79,8 +77,7 @@ export default function About() {
         <p>
           <a href={PRIVACY_POLICY_URL} target="_blank" rel="noreferrer">
             Privacy policy
-          </a>{" "}
-          <span className="muted small">(placeholder link — replace before release)</span>
+          </a>
         </p>
       </div>
     </div>
