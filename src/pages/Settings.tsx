@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { checkTmdbKey, TMDB_API_KEY_STORAGE } from "../tmdb";
-import { checkOmdbKey, OMDB_API_KEY_STORAGE } from "../omdb";
+import { checkOmdbKey, OMDB_API_KEY_STORAGE, isOmdbRateLimited, omdbQuotaResumeTime } from "../omdb";
 import { db } from "../db";
 import {
   exportAndDownloadBackup,
@@ -159,6 +159,13 @@ function ApiKeys() {
         </div>
         {omdbStatus === "valid" && <p className="status-ok">{omdbNote ?? "Key verified and saved."}</p>}
         {omdbStatus === "invalid" && omdbError && <p className="status-error">{omdbError}</p>}
+        {isOmdbRateLimited() && (
+          <p className="muted small">
+            This key has hit OMDb's daily lookup limit. Ratings resume automatically
+            {omdbQuotaResumeTime() ? ` after ${new Date(omdbQuotaResumeTime()!).toLocaleString()}` : " tomorrow"}. Cached
+            ratings still show in the meantime.
+          </p>
+        )}
       </div>
 
       <hr />

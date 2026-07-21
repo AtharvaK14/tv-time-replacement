@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Episode } from "../db";
 import { TMDB_IMAGE_BASE } from "../tmdb";
-import { getOmdbEpisodeRating, hasOmdbKey, type OmdbEpisodeRating } from "../omdb";
+import { getOmdbEpisodeRating, hasOmdbKey, OMDB_RATE_LIMIT_MESSAGE, type OmdbEpisodeRating } from "../omdb";
 import { useLockBodyScroll } from "../lib/useLockBodyScroll";
 
 interface Props {
@@ -83,7 +83,11 @@ export default function EpisodeDetailsPanel({ show, episode, watched, canToggleW
               )}
               {rating && rating !== "loading" && !rating.imdbRating && (
                 <span className="muted small">
-                  {rating.error ? `OMDb: ${rating.error}` : "No IMDb rating found for this episode."}
+                  {rating.rateLimited
+                    ? OMDB_RATE_LIMIT_MESSAGE
+                    : rating.error
+                      ? `OMDb: ${rating.error}`
+                      : "No IMDb rating found for this episode."}
                 </span>
               )}
               {!hasOmdbKey() && <span className="muted small">Add an OMDb key in Settings to see IMDb ratings.</span>}

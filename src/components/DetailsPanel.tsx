@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { db, type Episode, type Movie } from "../db";
 import { getTvShowDetails, getMovieDetails, TMDB_IMAGE_BASE, TMDB_BACKDROP_BASE } from "../tmdb";
-import { getOmdbRatings, hasOmdbKey, type OmdbRatings } from "../omdb";
+import { getOmdbRatings, hasOmdbKey, OMDB_RATE_LIMIT_MESSAGE, type OmdbRatings } from "../omdb";
 import { averageRuntime } from "../lib/runtime";
 import { getSeasonNumbers, ensureSeasonCached, totalEpisodeCount } from "../lib/episodeSync";
 import { ensureEpisodesWatched, recordEpisodeRewatch, recordMovieRewatch } from "../lib/watchEvents";
@@ -375,7 +375,11 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
           {ratings.rottenTomatoes && <span className="rating-pill">RT {ratings.rottenTomatoes}</span>}
           {!ratings.imdbRating && !ratings.rottenTomatoes && (
             <span className="muted small">
-              {ratings.error ? `OMDb: ${ratings.error}` : "No ratings found for this title on OMDb."}
+              {ratings.rateLimited
+                ? OMDB_RATE_LIMIT_MESSAGE
+                : ratings.error
+                  ? `OMDb: ${ratings.error}`
+                  : "No ratings found for this title on OMDb."}
             </span>
           )}
         </>
