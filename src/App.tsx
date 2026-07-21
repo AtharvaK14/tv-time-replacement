@@ -8,6 +8,7 @@ import AddTitle from "./pages/AddTitle";
 import Settings from "./pages/Settings";
 import BackupNudge from "./components/BackupNudge";
 import FirstRunWizard from "./components/FirstRunWizard";
+import BrandMark from "./components/BrandMark";
 import { hasApiKey } from "./tmdb";
 import { APP_NAME } from "./appInfo";
 import {
@@ -111,7 +112,7 @@ function App() {
       {showOnboarding && <FirstRunWizard onComplete={() => setShowOnboarding(false)} />}
 
       <nav className="side-rail">
-        <span className="side-rail-mark" aria-hidden="true">{APP_NAME[0]}</span>
+        <span className="side-rail-mark" aria-hidden="true"><BrandMark size={22} /></span>
         {TAB_ORDER.map((t) => {
           const Icon = TAB_ICONS[t];
           return (
@@ -130,7 +131,10 @@ function App() {
 
       <div className="app-shell">
         <header className="app-header">
-          <span className="brand">{APP_NAME}</span>
+          <span className="brand">
+            <BrandMark size={24} />
+            {APP_NAME}
+          </span>
         </header>
 
         {!online && (

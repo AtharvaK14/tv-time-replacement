@@ -37,6 +37,9 @@ body {
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
   font-weight: 700;
   font-size: 1.3rem;
   letter-spacing: -0.02em;
@@ -598,16 +601,14 @@ hr { border: none; border-top: 1px solid var(--border); }
   }
 
   .side-rail-mark {
-    width: 30px;
-    height: 30px;
-    border-radius: 7px;
-    background: var(--text);
-    color: var(--bg);
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-weight: 800;
-    font-size: 0.95rem;
     margin-bottom: 8px;
     flex-shrink: 0;
   }
