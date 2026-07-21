@@ -1,4 +1,7 @@
 import { APP_NAME } from "../appInfo";
+// Official TMDB logo, rendered unmodified (color and orientation) per TMDB's
+// brand terms — do not recolor it via CSS.
+import tmdbLogo from "../assets/tmdb-logo.svg";
 
 // PLACEHOLDER: swap in the real hosted privacy-policy URL before store
 // submission. The policy text itself is written and hosted separately
@@ -27,13 +30,7 @@ export default function About() {
 
       {/* --- TMDB: attribution required by TMDB's API Terms of Use --- */}
       <div className="settings-block about-source">
-        {/* PLACEHOLDER: replace with the official TMDB logo asset, unmodified in
-            color and orientation, from https://www.themoviedb.org/about/logos-attribution
-            Do NOT restyle or recolor it — that would violate TMDB's brand terms. */}
-        <div className="about-logo-placeholder" role="img" aria-label="TMDB logo placeholder">
-          TMDB logo
-          <span className="about-logo-note">placeholder — add official asset</span>
-        </div>
+        <img src={tmdbLogo} alt="The Movie Database (TMDB)" className="about-tmdb-logo" />
         <p className="about-notice">This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
         <p className="muted small">
           Show and movie metadata, posters, and episode data from{" "}

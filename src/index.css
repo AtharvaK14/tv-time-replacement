@@ -1290,26 +1290,13 @@ details[open] > summary::after { transform: rotate(90deg); }
 
 .about-source { border-left: 2px solid var(--border); padding-left: 12px; }
 
-.about-logo-placeholder {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  width: 130px;
-  height: 56px;
-  border: 1px dashed var(--border);
-  border-radius: 6px;
-  color: var(--muted);
-  font-size: 0.85rem;
-  font-weight: 600;
-  margin-bottom: 6px;
-}
-.about-logo-note {
-  font-size: 0.58rem;
-  font-weight: 400;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+/* Official TMDB logo: sized only, never recolored (brand requirement). Its
+   own gradient reads fine on the dark surface. */
+.about-tmdb-logo {
+  display: block;
+  height: 34px;
+  width: auto;
+  margin-bottom: 8px;
 }
 
 /* The exact TMDB-required notice: kept visually distinct so it reads as a
