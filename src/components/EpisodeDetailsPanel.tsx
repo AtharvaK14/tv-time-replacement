@@ -3,6 +3,7 @@ import type { Episode } from "../db";
 import { TMDB_IMAGE_BASE } from "../tmdb";
 import { getOmdbEpisodeRating, hasOmdbKey, OMDB_RATE_LIMIT_MESSAGE, type OmdbEpisodeRating } from "../omdb";
 import { useLockBodyScroll } from "../lib/useLockBodyScroll";
+import { useBackHandler } from "../lib/backHandler";
 
 interface Props {
   show: { name: string; imdbId?: string | null };
@@ -23,6 +24,9 @@ export default function EpisodeDetailsPanel({ show, episode, watched, canToggleW
   // the ref-counting in useLockBodyScroll ensures closing this one doesn't
   // prematurely unlock scroll while the parent panel is still open.
   useLockBodyScroll();
+  // Stacked on top of DetailsPanel's handler, so Android back closes this
+  // episode layer first, then the parent panel on the next press.
+  useBackHandler(true, onClose);
 
   const [rating, setRating] = useState<OmdbEpisodeRating | null | "loading">("loading");
 

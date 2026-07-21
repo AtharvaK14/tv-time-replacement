@@ -8,6 +8,7 @@ import { ensureEpisodesWatched, recordEpisodeRewatch, recordMovieRewatch } from 
 import { useDraggableSheet } from "../lib/useDraggableSheet";
 import { useLockBodyScroll } from "../lib/useLockBodyScroll";
 import { useIsMobile } from "../lib/useIsMobile";
+import { useBackHandler } from "../lib/backHandler";
 import EpisodeDetailsPanel from "./EpisodeDetailsPanel";
 
 interface Props {
@@ -58,6 +59,9 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
   useLockBodyScroll();
   const { sheetStyle, handleProps } = useDraggableSheet(onClose);
   const isMobile = useIsMobile();
+  // Android back closes this panel instead of the app. A stacked episode
+  // panel registers its own handler on top, so back closes that first.
+  useBackHandler(true, onClose);
 
   const [details, setDetails] = useState<CoreDetails | null>(null);
   const [ratings, setRatings] = useState<OmdbRatings | null | "loading">("loading");

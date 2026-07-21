@@ -1,4 +1,4 @@
-import { useState, useEffect, type ComponentType } from "react";
+import { useState, useEffect, useRef, type ComponentType } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "./db";
 import Home from "./pages/Home";
@@ -17,6 +17,8 @@ import {
   BACKUP_COMPLETED_EVENT,
   type PersistStatus,
 } from "./lib/persistence";
+import { initNative } from "./lib/native";
+import { useOnline } from "./lib/useOnline";
 import { HomeIcon, ShowsIcon, MoviesIcon, DiscoverIcon, SettingsIcon, type IconProps } from "./components/icons";
 import "./index.css";
 
@@ -57,12 +59,30 @@ function App() {
 
   const [persistStatus, setPersistStatus] = useState<PersistStatus | null>(null);
   const [, forceNudgeRecheck] = useState(0);
+  const online = useOnline();
 
   useEffect(() => {
     initStoragePersistence().then(setPersistStatus);
     const onBackupCompleted = () => forceNudgeRecheck((t) => t + 1);
     window.addEventListener(BACKUP_COMPLETED_EVENT, onBackupCompleted);
     return () => window.removeEventListener(BACKUP_COMPLETED_EVENT, onBackupCompleted);
+  }, []);
+
+  // Android hardware/gesture back button. A ref keeps the listener (set up
+  // once) reading the current tab. Open overlays consume the press first
+  // (they register via useBackHandler); otherwise back goes to Home, and
+  // only a back press already at Home root exits the app — never from a
+  // detail view or a non-Home tab.
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  useEffect(() => {
+    return initNative(() => {
+      if (tabRef.current !== "home") {
+        setTab("home");
+        return true;
+      }
+      return false; // at Home root → allow exit
+    });
   }, []);
 
   // Only nudge when there's actually a library to lose.
@@ -91,7 +111,7 @@ function App() {
       {showOnboarding && <FirstRunWizard onComplete={() => setShowOnboarding(false)} />}
 
       <nav className="side-rail">
-        <span className="side-rail-mark" aria-hidden="true">R</span>
+        <span className="side-rail-mark" aria-hidden="true">{APP_NAME[0]}</span>
         {TAB_ORDER.map((t) => {
           const Icon = TAB_ICONS[t];
           return (
@@ -112,6 +132,12 @@ function App() {
         <header className="app-header">
           <span className="brand">{APP_NAME}</span>
         </header>
+
+        {!online && (
+          <div className="offline-banner" role="status">
+            You're offline. Your library still works; search and fetching new details need a connection.
+          </div>
+        )}
 
         {nudge.show && nudge.reason && (
           <BackupNudge reason={nudge.reason} onBackUp={() => setTab("settings")} onDismiss={dismissNudge} />
