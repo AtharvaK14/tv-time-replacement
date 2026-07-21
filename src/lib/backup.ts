@@ -7,6 +7,9 @@ import {
   type TitleMatch,
   type Setting,
 } from "../db";
+import { Capacitor } from "@capacitor/core";
+import { Filesystem, Directory, Encoding } from "@capacitor/filesystem";
+import { Share } from "@capacitor/share";
 import { TMDB_API_KEY_STORAGE } from "../tmdb";
 import { OMDB_API_KEY_STORAGE } from "../omdb";
 import { recordBackupCompleted, API_KEYS_CHANGED_EVENT } from "./persistence";
@@ -106,29 +109,61 @@ export interface ExportResult {
   exportedAt: string;
 }
 
+/** Raised when the user dismisses the native share sheet — a cancel, not a failure. */
+export class ExportCancelledError extends Error {
+  constructor() {
+    super("Export cancelled — no file was saved.");
+    this.name = "ExportCancelledError";
+  }
+}
+
 /**
- * Browser build: Blob + <a download>. When the Capacitor Android shell is
- * added (Phase 4), this is the seam that switches to Filesystem + the
- * native share sheet under Capacitor.isNativePlatform().
+ * Desktop/web: Blob + <a download>. Android WebView can't download blob:
+ * URLs, so on a native platform we write the JSON to a file and hand it to
+ * the system share sheet (Save to Files / Drive / send anywhere).
  */
 export async function exportAndDownloadBackup(): Promise<ExportResult> {
   const backup = await buildBackup();
   // Compact JSON on purpose: a large library is multiple MB, and pretty-
   // printing roughly doubles it for no reader benefit.
   const json = JSON.stringify(backup);
-  const blob = new Blob([json], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
   const filename = backupFilename(backup.exportedAt);
 
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a); // Firefox needs the anchor in the DOM
-  a.click();
-  a.remove();
-  // Revoking immediately can abort an in-flight download in some browsers;
-  // a delayed revoke is the standard safe pattern.
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  if (Capacitor.isNativePlatform()) {
+    // Stage the file in the app's cache, then let the OS share sheet move
+    // it wherever the user wants. Cache needs no storage permission; the
+    // share target handles the real destination.
+    const { uri } = await Filesystem.writeFile({
+      path: filename,
+      data: json,
+      directory: Directory.Cache,
+      encoding: Encoding.UTF8,
+    });
+    try {
+      await Share.share({
+        title: "WatchTime backup",
+        text: filename,
+        url: uri,
+        dialogTitle: "Save or share your WatchTime backup",
+      });
+    } catch {
+      // The plugin rejects when the user dismisses the sheet without
+      // picking a target. Nothing was saved, so don't count it as a backup.
+      throw new ExportCancelledError();
+    }
+  } else {
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a); // Firefox needs the anchor in the DOM
+    a.click();
+    a.remove();
+    // Revoking immediately can abort an in-flight download in some browsers;
+    // a delayed revoke is the standard safe pattern.
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
 
   recordBackupCompleted(backup.exportedAt);
   return { counts: tableCounts(backup), filename, exportedAt: backup.exportedAt };

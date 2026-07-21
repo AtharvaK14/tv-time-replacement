@@ -8,6 +8,7 @@ import {
   validateBackup,
   restoreBackup,
   tableCounts,
+  ExportCancelledError,
   type ValidatedBackup,
   type ExportResult,
   type RestoreResult,
@@ -236,7 +237,10 @@ function BackupRestore() {
       setExportResult(res);
       setLastBackup(getLastBackupAt());
     } catch (e) {
-      setExportError(e instanceof Error ? e.message : String(e));
+      // Dismissing the native share sheet is a choice, not a failure — stay quiet.
+      if (!(e instanceof ExportCancelledError)) {
+        setExportError(e instanceof Error ? e.message : String(e));
+      }
     } finally {
       setExporting(false);
     }
@@ -316,7 +320,11 @@ function BackupRestore() {
             Backup JSON file
             <input
               type="file"
-              accept=".json,application/json"
+              // Android file pickers often report a .json backup as
+              // octet-stream/plain and would hide it under a strict
+              // application/json filter, so the accepted types are broadened
+              // (the file contents are validated on read regardless).
+              accept=".json,application/json,application/octet-stream,text/plain"
               onChange={(e) => handleFileChosen(e.target.files?.[0] ?? null)}
             />
           </label>
