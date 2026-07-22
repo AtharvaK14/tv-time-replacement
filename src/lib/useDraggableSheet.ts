@@ -10,6 +10,12 @@ export const SHEET_TOP_GAP_PX = 12;
 // tall or too short once you've used it.
 const COLLAPSED_VISIBLE_FRACTION = 0.55;
 
+// Maximum expansion: the sheet stops at 75% of the screen height rather
+// than nearly full, so part of the underlying screen stays visible, the
+// drag handle stays reachable, and dragging back down doesn't start right
+// under the system notification/quick-settings pull-down zone.
+const MAX_EXPANDED_VISIBLE_FRACTION = 0.75;
+
 const SNAP_TRANSITION = "transform 320ms cubic-bezier(0.32, 0.72, 0, 1)";
 // Must match the transition duration above: after triggering a dismiss we
 // wait this long before actually calling onDismiss, so the panel closes
@@ -75,6 +81,7 @@ export interface DraggableSheetHandle {
  */
 export function useDraggableSheet(onDismiss: () => void): DraggableSheetHandle {
   const [expanded, setExpanded] = useState(false);
+  const [expandedOffset, setExpandedOffset] = useState(0);
   const [collapsedOffset, setCollapsedOffset] = useState(0);
   const [dismissOffset, setDismissOffset] = useState(0);
   const [liveTranslateY, setLiveTranslateY] = useState<number | null>(null);
@@ -87,6 +94,9 @@ export function useDraggableSheet(onDismiss: () => void): DraggableSheetHandle {
   useEffect(() => {
     function computeOffsets() {
       const fullSheetHeight = window.innerHeight - SHEET_TOP_GAP_PX;
+      // Expanded shows at most MAX_EXPANDED_VISIBLE_FRACTION of the screen:
+      // push the sheet down so its top edge sits that far from the top.
+      setExpandedOffset(Math.max(0, fullSheetHeight - window.innerHeight * MAX_EXPANDED_VISIBLE_FRACTION));
       const visibleWhenCollapsed = window.innerHeight * COLLAPSED_VISIBLE_FRACTION;
       setCollapsedOffset(Math.max(0, fullSheetHeight - visibleWhenCollapsed));
       // Fully off-screen: translated down by the sheet's own full height,
@@ -107,7 +117,7 @@ export function useDraggableSheet(onDismiss: () => void): DraggableSheetHandle {
   const onPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
       if (e.button !== 0 && e.pointerType === "mouse") return;
-      const startTranslateY = expanded ? 0 : collapsedOffset;
+      const startTranslateY = expanded ? expandedOffset : collapsedOffset;
       dragState.current = {
         startClientY: e.clientY,
         startTranslateY,
@@ -119,7 +129,7 @@ export function useDraggableSheet(onDismiss: () => void): DraggableSheetHandle {
       setLiveTranslateY(startTranslateY);
       e.currentTarget.setPointerCapture(e.pointerId);
     },
-    [expanded, collapsedOffset]
+    [expanded, expandedOffset, collapsedOffset]
   );
 
   const onPointerMove = useCallback(
@@ -132,7 +142,8 @@ export function useDraggableSheet(onDismiss: () => void): DraggableSheetHandle {
 
       let next: number;
       if (raw <= collapsedOffset) {
-        next = Math.max(0, raw); // normal expand<->collapse range, 1:1
+        // normal expand<->collapse range, 1:1, clamped at the 75% expanded stop
+        next = Math.max(expandedOffset, raw);
       } else {
         // Past the resting point: damped, see DISMISS_DRAG_RESISTANCE.
         const overshoot = raw - collapsedOffset;
@@ -147,7 +158,7 @@ export function useDraggableSheet(onDismiss: () => void): DraggableSheetHandle {
       drag.lastTimestamp = e.timeStamp;
       setLiveTranslateY(next);
     },
-    [collapsedOffset, dismissOffset]
+    [expandedOffset, collapsedOffset, dismissOffset]
   );
 
   const endDrag = useCallback(() => {
@@ -168,7 +179,7 @@ export function useDraggableSheet(onDismiss: () => void): DraggableSheetHandle {
     } else if (drag.velocity > VELOCITY_FLICK_THRESHOLD) {
       outcome = "collapse";
     } else {
-      outcome = liveTranslateY < collapsedOffset / 2 ? "expand" : "collapse";
+      outcome = liveTranslateY < (expandedOffset + collapsedOffset) / 2 ? "expand" : "collapse";
     }
 
     dragState.current = null;
@@ -181,9 +192,9 @@ export function useDraggableSheet(onDismiss: () => void): DraggableSheetHandle {
       setExpanded(outcome === "expand");
       setLiveTranslateY(null); // hand control back to the expanded/collapsed CSS value
     }
-  }, [liveTranslateY, collapsedOffset, dismissOffset]);
+  }, [liveTranslateY, expandedOffset, collapsedOffset, dismissOffset]);
 
-  const currentTranslateY = liveTranslateY !== null ? liveTranslateY : expanded ? 0 : collapsedOffset;
+  const currentTranslateY = liveTranslateY !== null ? liveTranslateY : expanded ? expandedOffset : collapsedOffset;
 
   return {
     expanded,

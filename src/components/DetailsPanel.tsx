@@ -77,6 +77,9 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
   const [loadingSeason, setLoadingSeason] = useState<number | null>(null);
   const [episodesInDb, setEpisodesInDb] = useState<Episode[]>([]);
   const [watchedKeys, setWatchedKeys] = useState<Set<string>>(new Set());
+  // Total watch events per episode key, so the episode panel can show a live
+  // rewatch count (+N) as "Watch again" is pressed.
+  const [watchCountByKey, setWatchCountByKey] = useState<Map<string, number>>(new Map());
   const [openEpisode, setOpenEpisode] = useState<Episode | null>(null);
 
   // Escape closes this panel, unless the episode panel is stacked on top
@@ -174,6 +177,7 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
     ]);
     setEpisodesInDb(eps);
     setWatchedKeys(new Set(watched.map((w) => w.key)));
+    setWatchCountByKey(new Map(watched.map((w) => [w.key, w.watchCount ?? 1])));
   }
 
   async function toggleExpand(seasonNumber: number) {
@@ -614,15 +618,12 @@ export default function DetailsPanel({ kind, tmdbId, onClose }: Props) {
       show={{ name: details.name, imdbId: details.imdbId }}
       episode={openEpisode}
       watched={watchedKeys.has(openEpisode.key)}
+      watchCount={watchCountByKey.get(openEpisode.key) ?? 0}
       canToggleWatched={inLibrary}
-      onToggleWatched={async () => {
-        await toggleEpisodeWatched(openEpisode);
-        setOpenEpisode(null);
-      }}
-      onWatchAgain={async () => {
-        await rewatchEpisodes([openEpisode]);
-        setOpenEpisode(null);
-      }}
+      // Deliberately do NOT close on these: the panel stays open so the
+      // watched toggle and the live rewatch count (+N) update in place.
+      onToggleWatched={() => toggleEpisodeWatched(openEpisode)}
+      onWatchAgain={() => rewatchEpisodes([openEpisode])}
       onClose={() => setOpenEpisode(null)}
     />
   );

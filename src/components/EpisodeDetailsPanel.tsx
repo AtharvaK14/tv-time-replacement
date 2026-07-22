@@ -9,6 +9,9 @@ interface Props {
   show: { name: string; imdbId?: string | null };
   episode: Episode;
   watched: boolean;
+  // Total watch events for this episode (1 = watched once, 2+ = rewatched).
+  // Drives the visible rewatch count; 0 when unwatched.
+  watchCount: number;
   canToggleWatched?: boolean;
   onToggleWatched: () => void;
   // Rewatch support: records one more watch EVENT for an already-watched
@@ -18,7 +21,16 @@ interface Props {
   onClose: () => void;
 }
 
-export default function EpisodeDetailsPanel({ show, episode, watched, canToggleWatched = true, onToggleWatched, onWatchAgain, onClose }: Props) {
+export default function EpisodeDetailsPanel({
+  show,
+  episode,
+  watched,
+  watchCount,
+  canToggleWatched = true,
+  onToggleWatched,
+  onWatchAgain,
+  onClose,
+}: Props) {
   // Same reference-counted lock DetailsPanel uses. This panel is often
   // opened FROM WITHIN an already-open DetailsPanel (both call this hook),
   // the ref-counting in useLockBodyScroll ensures closing this one doesn't
@@ -29,6 +41,8 @@ export default function EpisodeDetailsPanel({ show, episode, watched, canToggleW
   useBackHandler(true, onClose);
 
   const [rating, setRating] = useState<OmdbEpisodeRating | null | "loading">("loading");
+  // Extra watches beyond the first, shown as "+N".
+  const rewatches = Math.max(0, watchCount - 1);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -55,63 +69,78 @@ export default function EpisodeDetailsPanel({ show, episode, watched, canToggleW
     };
   }, [show, episode.seasonNumber, episode.episodeNumber]);
 
+  const seasonEp = `S${String(episode.seasonNumber).padStart(2, "0")}E${String(episode.episodeNumber).padStart(2, "0")}`;
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal details-modal" onClick={(e) => e.stopPropagation()}>
-        <button className="close-x" onClick={onClose} aria-label="Close">
+      <div className="modal episode-detail-modal" onClick={(e) => e.stopPropagation()}>
+        <button className="close-x episode-detail-close" onClick={onClose} aria-label="Close">
           &times;
         </button>
 
-        <div className="details-layout">
+        {/* 1 + 2: landscape thumbnail with the S/E number overlaid bottom-left */}
+        <div className="episode-hero">
           {episode.stillPath ? (
-            <img
-              src={`${TMDB_IMAGE_BASE}${episode.stillPath}`}
-              alt={episode.name}
-              className="details-poster episode-still"
-            />
+            <img src={`${TMDB_IMAGE_BASE}${episode.stillPath}`} alt={episode.name} className="episode-hero-img" />
           ) : (
-            <div className="poster-placeholder details-poster episode-still" />
+            <div className="poster-placeholder episode-hero-img" />
           )}
-          <div className="details-body">
-            <p className="muted small">
-              {show.name} &middot; Season {episode.seasonNumber}, Episode {episode.episodeNumber}
-            </p>
-            <h2>{episode.name}</h2>
-            <p className="muted small">{episode.airDate || "Air date unknown"}</p>
+          <span className="episode-hero-badge">{seasonEp}</span>
+        </div>
 
-            <div className="ratings-row">
-              <span className="rating-pill">TMDB {episode.tmdbRating.toFixed(1)}</span>
-              {rating === "loading" && hasOmdbKey() && <span className="muted small">Loading IMDb rating...</span>}
-              {rating && rating !== "loading" && rating.imdbRating && (
-                <span className="rating-pill">IMDb {rating.imdbRating}</span>
-              )}
-              {rating && rating !== "loading" && !rating.imdbRating && (
-                <span className="muted small">
-                  {rating.rateLimited
-                    ? OMDB_RATE_LIMIT_MESSAGE
-                    : rating.error
-                      ? `OMDb: ${rating.error}`
-                      : "No IMDb rating found for this episode."}
-                </span>
-              )}
-              {!hasOmdbKey() && <span className="muted small">Add an OMDb key in Settings to see IMDb ratings.</span>}
-            </div>
+        <div className="episode-detail-body">
+          {/* 3: title */}
+          <h2 className="episode-detail-title">{episode.name}</h2>
 
-            <p className="overview">
-              {episode.overview || (rating !== "loading" && rating?.plot) || "No summary available."}
-            </p>
+          {/* 4: original air date */}
+          <p className="muted small">{episode.airDate || "Air date unknown"}</p>
 
-            {/* Deliberately a plain button, not a <label> wrapping anything else, this exact
-                pattern (a checkbox/label sharing space with a clickable sibling) was the root
-                cause of a real bug where opening episode details also silently toggled its
-                watched state. Keeping these fully separate interactive elements on purpose. */}
-            {canToggleWatched && (
-              <div className="field-row">
-                <button onClick={onToggleWatched}>{watched ? "Mark unwatched" : "Mark watched"}</button>
-                {watched && onWatchAgain && <button onClick={onWatchAgain}>Watch again</button>}
-              </div>
+          {/* 5: rating */}
+          <div className="ratings-row">
+            <span className="rating-pill">TMDB {episode.tmdbRating.toFixed(1)}</span>
+            {rating === "loading" && hasOmdbKey() && <span className="muted small">Loading IMDb rating...</span>}
+            {rating && rating !== "loading" && rating.imdbRating && (
+              <span className="rating-pill">IMDb {rating.imdbRating}</span>
             )}
+            {rating && rating !== "loading" && !rating.imdbRating && (
+              <span className="muted small">
+                {rating.rateLimited
+                  ? OMDB_RATE_LIMIT_MESSAGE
+                  : rating.error
+                    ? `OMDb: ${rating.error}`
+                    : "No IMDb rating found for this episode."}
+              </span>
+            )}
+            {!hasOmdbKey() && <span className="muted small">Add an OMDb key in Settings to see IMDb ratings.</span>}
           </div>
+
+          {/* 6: description / synopsis */}
+          <p className="overview">
+            {episode.overview || (rating !== "loading" && rating?.plot) || "No summary available."}
+          </p>
+
+          {/* 7: actions. Separate "Mark watched" toggle and "Watch again",
+              the latter shown only once watched. Deliberately plain buttons,
+              not a <label>+checkbox (that pattern once caused opening the
+              panel to silently toggle watched state). */}
+          {canToggleWatched && (
+            <>
+              <div className="episode-actions">
+                <button className="ep-action-btn" onClick={onToggleWatched}>
+                  {watched ? "Mark as Unwatched" : "Mark as Watched"}
+                </button>
+                {watched && onWatchAgain && (
+                  <button className="ep-action-btn" onClick={onWatchAgain}>
+                    Watch Again
+                    {rewatches > 0 && <span className="rewatch-badge">+{rewatches}</span>}
+                  </button>
+                )}
+              </div>
+              {watched && rewatches > 0 && (
+                <p className="muted small">Watched {watchCount} times.</p>
+              )}
+            </>
+          )}
         </div>
       </div>
     </div>
