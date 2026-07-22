@@ -49,7 +49,7 @@ export function DiscoverIcon({ size = 20, className }: IconProps) {
   return (
     <svg {...baseProps(size)} className={className}>
       <circle cx="12" cy="12" r="9" />
-      <path d="M15 9l-2 6-6 2 2-6z" fill="currentColor" stroke="none" />
+      <path d="M15.8 8l-2 6-6 2 2-6z" fill="currentColor" stroke="none" />
     </svg>
   );
 }
