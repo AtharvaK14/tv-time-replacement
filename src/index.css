@@ -424,11 +424,10 @@ hr { border: none; border-top: 1px solid var(--border); }
   position: fixed;
   left: 0;
   right: 0;
-  top: 12px; /* the "small gap at the top" when fully dragged up. Keep this
-                in sync with SHEET_TOP_GAP_PX in useDraggableSheet.ts if you
-                change it, the hook's collapsed/expanded math assumes this
-                exact value. */
   bottom: 0;
+  /* height is set inline by useDraggableSheet (max ~75% of the viewport),
+     bottom-anchored, so the whole sheet stays on screen when expanded and
+     all of its content remains scrollable within .sheet-scroll-area. */
   max-width: 640px;
   margin: 0 auto;
   background: var(--surface);

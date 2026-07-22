@@ -1,20 +1,17 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 
-// The small gap left at the very top of the screen when fully expanded,
-// matching the requested "drag to the top, small gap remaining" behavior.
-// Must match the sheet's own `top` value in CSS (.details-sheet { top }).
-export const SHEET_TOP_GAP_PX = 12;
+// The sheet's height is capped at this fraction of the viewport (its
+// maximum expansion). Bounding the HEIGHT — rather than translating a
+// full-height sheet down — keeps the whole sheet on screen when expanded,
+// so all of its content stays scrollable. It also leaves part of the
+// underlying screen visible, keeps the drag handle reachable, and avoids
+// starting a drag-down right under the system notification/quick-settings
+// pull zone.
+const SHEET_VISIBLE_FRACTION = 0.75;
 
-// How much of the viewport height is visible in the sheet's default
-// (not dragged) state. A judgment call, not a spec, tune if it feels too
-// tall or too short once you've used it.
+// How much of the viewport is visible in the sheet's default (collapsed,
+// not dragged) state. A judgment call, not a spec.
 const COLLAPSED_VISIBLE_FRACTION = 0.55;
-
-// Maximum expansion: the sheet stops at 75% of the screen height rather
-// than nearly full, so part of the underlying screen stays visible, the
-// drag handle stays reachable, and dragging back down doesn't start right
-// under the system notification/quick-settings pull-down zone.
-const MAX_EXPANDED_VISIBLE_FRACTION = 0.75;
 
 const SNAP_TRANSITION = "transform 320ms cubic-bezier(0.32, 0.72, 0, 1)";
 // Must match the transition duration above: after triggering a dismiss we
@@ -61,10 +58,15 @@ export interface DraggableSheetHandle {
   };
 }
 
+const collapsedFor = (height: number) => Math.max(0, height - window.innerHeight * COLLAPSED_VISIBLE_FRACTION);
+
 /**
  * Drives a bottom-sheet-style panel with two snap points (collapsed and
- * expanded near the top) plus drag-to-dismiss: dragging down past the
- * collapsed resting point, or a fast downward flick once already at or
+ * expanded) plus drag-to-dismiss. The sheet is bottom-anchored with a fixed
+ * height (SHEET_VISIBLE_FRACTION of the viewport, set via sheetStyle.height):
+ * expanded is translateY(0) — fully on screen, all content scrollable —
+ * and collapsed translates it partway down to a peek. Dragging down past
+ * the collapsed resting point, or a fast downward flick once already at or
  * below it, closes the panel by calling `onDismiss` after the slide-away
  * animation finishes.
  *
@@ -81,9 +83,11 @@ export interface DraggableSheetHandle {
  */
 export function useDraggableSheet(onDismiss: () => void): DraggableSheetHandle {
   const [expanded, setExpanded] = useState(false);
-  const [expandedOffset, setExpandedOffset] = useState(0);
-  const [collapsedOffset, setCollapsedOffset] = useState(0);
-  const [dismissOffset, setDismissOffset] = useState(0);
+  const [sheetHeight, setSheetHeight] = useState(() => window.innerHeight * SHEET_VISIBLE_FRACTION);
+  const [collapsedOffset, setCollapsedOffset] = useState(() => collapsedFor(window.innerHeight * SHEET_VISIBLE_FRACTION));
+  // Fully off-screen = translated down by the sheet's own height, so its top
+  // edge lands at the bottom of the viewport.
+  const [dismissOffset, setDismissOffset] = useState(() => window.innerHeight * SHEET_VISIBLE_FRACTION);
   const [liveTranslateY, setLiveTranslateY] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const dragState = useRef<DragState | null>(null);
@@ -93,15 +97,10 @@ export function useDraggableSheet(onDismiss: () => void): DraggableSheetHandle {
 
   useEffect(() => {
     function computeOffsets() {
-      const fullSheetHeight = window.innerHeight - SHEET_TOP_GAP_PX;
-      // Expanded shows at most MAX_EXPANDED_VISIBLE_FRACTION of the screen:
-      // push the sheet down so its top edge sits that far from the top.
-      setExpandedOffset(Math.max(0, fullSheetHeight - window.innerHeight * MAX_EXPANDED_VISIBLE_FRACTION));
-      const visibleWhenCollapsed = window.innerHeight * COLLAPSED_VISIBLE_FRACTION;
-      setCollapsedOffset(Math.max(0, fullSheetHeight - visibleWhenCollapsed));
-      // Fully off-screen: translated down by the sheet's own full height,
-      // so its top edge lands exactly at the bottom edge of the viewport.
-      setDismissOffset(fullSheetHeight);
+      const height = window.innerHeight * SHEET_VISIBLE_FRACTION;
+      setSheetHeight(height);
+      setCollapsedOffset(collapsedFor(height));
+      setDismissOffset(height);
     }
     computeOffsets();
     window.addEventListener("resize", computeOffsets);
@@ -117,7 +116,7 @@ export function useDraggableSheet(onDismiss: () => void): DraggableSheetHandle {
   const onPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
       if (e.button !== 0 && e.pointerType === "mouse") return;
-      const startTranslateY = expanded ? expandedOffset : collapsedOffset;
+      const startTranslateY = expanded ? 0 : collapsedOffset;
       dragState.current = {
         startClientY: e.clientY,
         startTranslateY,
@@ -129,7 +128,7 @@ export function useDraggableSheet(onDismiss: () => void): DraggableSheetHandle {
       setLiveTranslateY(startTranslateY);
       e.currentTarget.setPointerCapture(e.pointerId);
     },
-    [expanded, expandedOffset, collapsedOffset]
+    [expanded, collapsedOffset]
   );
 
   const onPointerMove = useCallback(
@@ -142,8 +141,7 @@ export function useDraggableSheet(onDismiss: () => void): DraggableSheetHandle {
 
       let next: number;
       if (raw <= collapsedOffset) {
-        // normal expand<->collapse range, 1:1, clamped at the 75% expanded stop
-        next = Math.max(expandedOffset, raw);
+        next = Math.max(0, raw); // normal expand<->collapse range, 1:1
       } else {
         // Past the resting point: damped, see DISMISS_DRAG_RESISTANCE.
         const overshoot = raw - collapsedOffset;
@@ -158,7 +156,7 @@ export function useDraggableSheet(onDismiss: () => void): DraggableSheetHandle {
       drag.lastTimestamp = e.timeStamp;
       setLiveTranslateY(next);
     },
-    [expandedOffset, collapsedOffset, dismissOffset]
+    [collapsedOffset, dismissOffset]
   );
 
   const endDrag = useCallback(() => {
@@ -179,7 +177,7 @@ export function useDraggableSheet(onDismiss: () => void): DraggableSheetHandle {
     } else if (drag.velocity > VELOCITY_FLICK_THRESHOLD) {
       outcome = "collapse";
     } else {
-      outcome = liveTranslateY < (expandedOffset + collapsedOffset) / 2 ? "expand" : "collapse";
+      outcome = liveTranslateY < collapsedOffset / 2 ? "expand" : "collapse";
     }
 
     dragState.current = null;
@@ -192,15 +190,16 @@ export function useDraggableSheet(onDismiss: () => void): DraggableSheetHandle {
       setExpanded(outcome === "expand");
       setLiveTranslateY(null); // hand control back to the expanded/collapsed CSS value
     }
-  }, [liveTranslateY, expandedOffset, collapsedOffset, dismissOffset]);
+  }, [liveTranslateY, collapsedOffset, dismissOffset]);
 
-  const currentTranslateY = liveTranslateY !== null ? liveTranslateY : expanded ? expandedOffset : collapsedOffset;
+  const currentTranslateY = liveTranslateY !== null ? liveTranslateY : expanded ? 0 : collapsedOffset;
 
   return {
     expanded,
     setExpanded,
     isDragging,
     sheetStyle: {
+      height: `${sheetHeight}px`,
       transform: `translateY(${currentTranslateY}px)`,
       transition: isDragging ? "none" : SNAP_TRANSITION,
     },
